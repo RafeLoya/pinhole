@@ -35,30 +35,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Capture a frame
         let frame = camera.frame()?;
 
-        // Decode into RGB image (ImageBuffer)
-        let decoded = frame.decode_image::<RgbFormat>()?;
+        let buffer = frame.buffer();
+        let resolution = frame.resolution();
+        let frame_width = resolution.width() as usize;
+        let frame_height = resolution.height()  as usize;
 
-        // Get dimensions
-        let frame_width = decoded.width();
-        let frame_height = decoded.height();
-
-        // Calculate scaling factors
         let scale_x = frame_width as f32 / width as f32;
         let scale_y = frame_height as f32 / height as f32; // Adjust for terminal character aspect ratio
 
-        // Clear the screen
         print!("{}", clear_screen);
 
         for y in 0..height {
             for x in 0..width {
-                let img_x = (x as f32 * scale_x) as u32;
-                let img_y = (y as f32 * scale_y) as u32;
+                let img_x = (x as f32 * scale_x) as usize;
+                let img_y = (y as f32 * scale_y) as usize;
 
                 if img_x < frame_width && img_y < frame_height {
-                    let pixel = decoded.get_pixel(img_x, img_y);
-                    let [r, g, b] = pixel.0;
+                    let pixel_index = (img_y * frame_width + img_x) * 3;
+                    if pixel_index + 2 >= buffer.len() {
+                        print!(" ");
+                        continue;
+                    }
 
-                    // Apply contrast and brightness
+                    let r = buffer[pixel_index];
+                    let g = buffer[pixel_index + 1];
+                    let b = buffer[pixel_index + 2];
+
                     let apply_contrast_brightness = |value: u8| -> u8 {
                         let mut v = value as f32 / 255.0;
                         // Apply contrast
@@ -88,6 +90,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         io::stdout().flush()?;
-        thread::sleep(Duration::from_millis(33)); // ~30 FPS
+        thread::sleep(Duration::from_millis(33));
     }
 }
