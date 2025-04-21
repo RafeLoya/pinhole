@@ -1,7 +1,6 @@
 {
-    "image": "docker.io/acfreeman/rustnetworking",
-    "runArgs": [
-    "--cap-add=NET_ADMIN",
-    "--privileged"
-    ]
+    "dockerComposeFile": "local.docker-compose.yml",
+    "service": "server",
+    "workspaceFolder": "/app",
+    "remoteUser": "root",
 }
