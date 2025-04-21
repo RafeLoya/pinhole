@@ -12,3 +12,6 @@ quinn = "0.11"
 tokio = { version = "1.40", features = ["full"] }
 clap = { version = "4.5.37", features = ["derive"] }
 nokhwa = { version = "0.10.0", features = ["input-native", "output-wgpu"] }
+
+[[bin]]
+name = "client"
