@@ -1,0 +1,14 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2024"
+authors = ["Group 4"]
+repository = "https://github.com/csi4321/final-project-group4_s25"
+description = "Client for terminal-based video call service with ASCII streaming"
+
+[dependencies]
+common = { path = "../common" }
+quinn = "0.11"
+tokio = { version = "1.40", features = ["full"] }
+clap = { version = "4.5.37", features = ["derive"] }
+nokhwa = { version = "0.10.0", features = ["input-native", "output-wgpu"] }
