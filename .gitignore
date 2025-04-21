@@ -18,9 +18,8 @@ Cargo.lock
 
 /target
 
+# Application ignores
+*.log
 
-# Added by cargo
-#
-# already existing elements were commented out
-
-#/target
+# We can track this if it allows for reproducible builds and run configs
+.idea/
