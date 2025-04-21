@@ -1,0 +1,15 @@
+services:
+  server:
+    build:
+      context: ./
+      dockerfile: .devcontainer/server.Dockerfile
+      platforms:
+        - linux/amd64  # Build for GCP's architecture
+    image: rust-server
+    environment:
+      - RUST_LOG=info
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+    ports:
+      - "8080:8080"
+    restart: always

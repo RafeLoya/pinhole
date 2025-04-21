@@ -1,0 +1,10 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2024"
+authors = ["Group 4"]
+repository = "https://github.com/csi4321/final-project-group4_s25"
+description = "Shared protocol and utilities for terminal-based video call service"
+
+[dependencies]
+chrono = "0.4.40"
