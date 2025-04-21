@@ -50,22 +50,26 @@ impl Default for LoggerConfig {
 /// # Examples
 ///
 /// ```
+/// use common::logger::{Logger, LoggerConfig, LogLevel};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Create logger with default configuration
-/// let default_logger = logger::Logger::new()?;
+/// let default_logger = Logger::new()?;
 /// default_logger.info("This is an info message using the default log file")?;
 ///
 /// // Create logger with custom file name
-/// let custom_logger = logger::Logger::with_file_name("application.log")?;
+/// let custom_logger = Logger::with_file_name("application.log")?;
 /// custom_logger.info("This is an info message using a custom log file")?;
 ///
 /// // Create logger with full custom configuration
-/// let custom_config = logger::LoggerConfig {
+/// let custom_config = LoggerConfig {
 ///     log_file: "error_only.log".to_string(),
-///     min_level: logger::LogLevel::Error,
+///     min_level: LogLevel::Error,
 /// };
-/// let error_logger = logger::Logger::with_config(custom_config)?;
+/// let error_logger = Logger::with_config(custom_config)?;
 /// error_logger.info("This info won't be logged")?;
 /// error_logger.error("This error will be logged")?;
+/// # Ok(())
+/// # }
 /// ```
 pub struct Logger {
     config: LoggerConfig,
@@ -80,8 +84,12 @@ impl Logger {
     /// # Example
     ///
     /// ```
-    /// let logger = logger::Logger::new()?;
+    /// use common::logger::Logger;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let logger = Logger::new()?;
     /// logger.info("This is an info message using the default log file")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn new() -> Result<Self, std::io::Error> {
         Self::with_config(LoggerConfig::default())
@@ -94,8 +102,12 @@ impl Logger {
     /// # Example
     ///
     /// ```
-    /// let logger = logger::Logger::with_file_name("application.log")?;
+    /// use common::logger::Logger;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let logger = Logger::with_file_name("application.log")?;
     /// logger.info("This is an info message using a custom log file")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn with_file_name(file_name: &str) -> Result<Self, std::io::Error> {
         let config = LoggerConfig {
@@ -112,13 +124,17 @@ impl Logger {
     /// # Example
     ///
     /// ```
-    /// let custom_config = logger::LoggerConfig {
+    /// use common::logger::{Logger, LoggerConfig, LogLevel};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let custom_config = LoggerConfig {
     ///     log_file: "error_only.log".to_string(),
-    ///     min_level: logger::LogLevel::Error,
+    ///     min_level: LogLevel::Error,
     /// };
-    /// let logger = logger::Logger::with_config(custom_config)?;
+    /// let logger = Logger::with_config(custom_config)?;
     /// logger.info("This info won't be logged")?;
     /// logger.error("This error will be logged")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn with_config(config: LoggerConfig) -> Result<Self, std::io::Error> {
         let file = OpenOptions::new()
@@ -136,6 +152,18 @@ impl Logger {
     ///
     /// Only logs the message if the specified level is greater than or equal to
     /// the logger's minimum log level.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use common::logger::{Logger, LogLevel};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let logger = Logger::new()?;
+    /// // Log a message at INFO level
+    /// logger.log(LogLevel::Info, "This is an info message")?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn log(&self, level: LogLevel, message: &str) -> Result<(), std::io::Error> {
         if level < self.config.min_level {
             return Ok(());
