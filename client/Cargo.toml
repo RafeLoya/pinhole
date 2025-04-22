@@ -14,6 +14,8 @@ clap = { version = "4.5.37", features = ["derive"] }
 nokhwa = { version = "0.10.0", features = ["input-native", "output-wgpu"] }
 ratatui = "0.26"
 crossterm = "0.27"
+figlet-rs = "0.1.5"
+
 
 [[bin]]
 name = "client"
