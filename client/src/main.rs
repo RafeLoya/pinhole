@@ -175,44 +175,6 @@ fn draw_enhanced_loading(
 
     f.render_widget(tip_text, bottom_chunks[1]);
 }
-fn draw_loading(f: &mut Frame, frame_count: usize, total_frames: usize) {
-    let size = f.size();
-
-    // Divide terminal vertically: title, loading text, progress bar
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(5)
-        .constraints([
-            Constraint::Length(3), // title
-            Constraint::Length(3), // loading text
-            Constraint::Length(3), // progress bar
-        ])
-        .split(size);
-
-    // Block title
-    let block = Block::default()
-        .title("ASCII Cam")
-        .title_alignment(Alignment::Center)
-        .borders(Borders::ALL);
-    f.render_widget(block, size);
-
-    // Animated dots in loading message
-    let dots = ".".repeat((frame_count /10) %4 as usize);
-    let loading_text = format!("Initializing camera{}", dots);
-    let paragraph = Paragraph::new(loading_text)
-        .style(Style::default().fg(Color::Green))
-        .alignment(Alignment::Center);
-    f.render_widget(paragraph, chunks[1]);
-
-    // Progress bar logic
-    let progress_ratio = frame_count as f64 / total_frames as f64;
-    let percent = (progress_ratio * 100.0).min(100.0) as u16;
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title("Loading"))
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .percent(percent);
-    f.render_widget(gauge, chunks[2]);
-}
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
