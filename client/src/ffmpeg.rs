@@ -99,9 +99,11 @@ fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
             "-f", "dshow",
             "-framerate", "30",
             "-video_size", "640x480",
-            "-pixel_format", "rgb24",
-            "-i", "video=Webcam",
+            "-vcodec", "mjpeg", // <- Use vcodec instead of pixel_format on Windows
+            "-i", "video=USB2.0 HD UVC WebCam",
 
+            // Convert MJPEG to RGB24 if you want raw frames in Rust
+            "-vf", "format=rgb24",
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
 
