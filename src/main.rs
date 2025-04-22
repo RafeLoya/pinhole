@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Open the camera stream
     camera.open_stream()?;
+    camera.set_camera_requset(requested).unwrap();
 
     loop {
         // Capture a frame
