@@ -1,14 +1,13 @@
 mod ffmpeg;
 mod camera;
 mod ascii_renderer;
-mod ascii_frame;
 mod image_frame;
 mod ascii_converter;
 mod edge_detector;
 mod video_config;
 
 use crate::ascii_converter::AsciiConverter;
-use crate::ascii_frame::AsciiFrame;
+use common::ascii_frame::AsciiFrame;
 use crate::ascii_renderer::AsciiRenderer;
 use crate::camera::Camera;
 use crate::image_frame::ImageFrame;

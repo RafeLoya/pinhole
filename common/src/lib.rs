@@ -3,3 +3,4 @@ pub mod logger;
 pub mod metrics;
 pub mod packet;
 pub mod protocol;
+pub mod ascii_frame;
