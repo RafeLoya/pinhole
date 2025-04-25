@@ -1,5 +1,5 @@
 use std::error::Error;
-use crate::ascii_frame::AsciiFrame;
+use common::ascii_frame::AsciiFrame;
 use crate::edge_detector::EdgeDetector;
 use crate::image_frame::ImageFrame;
 

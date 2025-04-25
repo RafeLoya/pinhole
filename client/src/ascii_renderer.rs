@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::io;
 use std::io::Write;
-use crate::ascii_frame::AsciiFrame;
+use common::ascii_frame::AsciiFrame;
 
 // TODO: changing window / frame sizes during runtime
 
