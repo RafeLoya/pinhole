@@ -1,12 +1,12 @@
-# build:            `docker compose -f .devcontainer/docker-compose.yml up --build -d`
+# build:            `docker compose -f docker-compose.yml up --build -d`
 # enter container:  `docker exec -it rust-server bash'
-# teardown:         `docker compose -f .devcontainer/docker-compose.yml down`
+# teardown:         `docker compose -f docker-compose.yml down`
 
 services:
   server:
     build:
-      context: ../
-      dockerfile: .devcontainer/Dockerfile
+      context: ./
+      dockerfile: Dockerfile
       platforms:
         - linux/arm64
     image: rust-server
