@@ -9,14 +9,14 @@ mod server;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
-    
-    let addr = "[::1]:4433".parse::<SocketAddr>()?;
+
+    let addr = "[::]:4433".parse::<SocketAddr>()?;
     let server = Server::new(addr)?;
-    
+
     println!("Server listening on {}", server.local_addr()?);
-    
+
     // blocking call
     server.run().await?;
-    
+
     Ok(())
 }

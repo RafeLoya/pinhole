@@ -32,12 +32,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     1.5,
     //     0.0
     // );
-    // 
+    //
     // let mut camera = Camera::new(config.camera_width, config.camera_height)?;
-    // 
+    //
     // let mut image_frame = ImageFrame::new(config.camera_width, config.camera_height, 3)?;
     // let mut ascii_frame = AsciiFrame::new(config.ascii_width, config.ascii_height, ' ')?;
-    // 
+    //
     // let converter = AsciiConverter::new(
     //     AsciiConverter::DEFAULT_ASCII_INTENSITY.chars().collect(),
     //     AsciiConverter::DEFAULT_ASCII_HORIZONTAL.chars().collect(),
@@ -50,38 +50,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     config.contrast,
     //     config.brightness
     // )?;
-    // 
+    //
     // let mut renderer = AsciiRenderer::new()?;
-    // 
+    //
     // loop {
     //     if let Err(e) = camera.capture_frame(&mut image_frame) {
     //         eprintln!("failed while capturing frame: {}", e);
     //         break;
     //     }
-    // 
+    //
     //     if let Err(e) = converter.convert(&image_frame, &mut ascii_frame) {
     //         eprintln!("failed while converting frame: {}", e);
     //         break;
     //     }
-    // 
+    //
     //     if let Err(e) = renderer.render(&ascii_frame) {
     //         eprintln!("failed while rendering frame: {}", e);
     //         break;
     //     }
-    // 
+    //
     //     thread::sleep(Duration::from_millis(10));
     // }
-    
+
     tracing_subscriber::fmt::init();
-    
+
     let mut client = Client::new()?;
-    
+
     let server_addr = "[::1]:4433".parse::<SocketAddr>()?;
     client.connect(server_addr, "localhost").await?;
-    
+
     let response = client.send_message(b"hello from client!").await?;
     println!("response: {:?}", std::str::from_utf8(&response)?);
-    
+
     client.close();
     client.wait_idle().await;
 

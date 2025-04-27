@@ -1,25 +1,25 @@
-# build:            `docker compose -f .devcontainer/local.docker-compose.yml up --build`
-# enter container:  `docker compose -f .devcontainer/local.docker-compose.yml run --rm server /bin/bash`
-# teardown:         `docker compose -f .devcontainer/local.docker-compose.yml down`
+# build:            `docker compose -f .devcontainer/docker-compose.yml up --build -d`
+# enter container:  `docker exec -it rust-server bash'
+# teardown:         `docker compose -f .devcontainer/docker-compose.yml down`
 
 services:
   server:
     build:
       context: ../
-      dockerfile: .devcontainer/server.Dockerfile
+      dockerfile: .devcontainer/Dockerfile
       platforms:
         - linux/arm64
-    image: rust-server-local
-    container_name: rust-server-dev
+    image: rust-server
+    container_name: rust-server
     ports:
-      - "8080:8080"
+      - "4433:4433/udp"
     cap_add:
       - NET_ADMIN
     privileged: true
     environment:
       - RUST_LOG=debug
       - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8080
+      - SERVER_PORT=4433
       - MAX_CONNECTIONS=100
     volumes:
       - ../server:/app/server
