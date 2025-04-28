@@ -1,0 +1,24 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [common, client, server]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build ${{ matrix.package }}
+      run: cargo build --verbose -p ${{ matrix.package }}
+    - name: Run ${{ matrix.package }} tests
+      run: cargo test --verbose -p ${{ matrix.package }}
