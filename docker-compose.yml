@@ -1,0 +1,34 @@
+# build:            `docker compose -f docker-compose.yml up --build -d`
+# enter container:  `docker exec -it rust-server bash'
+# teardown:         `docker compose -f docker-compose.yml down`
+
+services:
+  server:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    image: rust-server
+    container_name: rust-server
+    ports:
+      - "4433:4433/udp"
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+    environment:
+      - RUST_LOG=debug
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=4433
+      - MAX_CONNECTIONS=100
+    volumes:
+      - ../server:/app/server
+      - ../common:/app/common
+    restart: unless-stopped  # Automatically restart if it crashes
+    networks:
+      - app-network
+    platform: linux/arm64
+
+networks:
+  app-network:
+    driver: bridge

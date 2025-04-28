@@ -1,0 +1,31 @@
+name: Build and Deploy Server
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy to ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner: [prod]  # Can add more if we want multiple runners
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build ${{ matrix.runner }}
+        run: |
+          docker compose -f .devcontainer/ci.docker-compose.yml build server
+
+      - name: Deploy to ${{ matrix.runner }}
+        run: |
+          docker compose -f .devcontainer/ci.docker-compose.yml down server -v
+          docker compose -f .devcontainer/ci.docker-compose.yml up server -d
+
+      - name: Clean
+        run: |
+          docker image prune -af
+          docker system prune -f
