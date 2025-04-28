@@ -1,6 +1,10 @@
 {
-    "dockerComposeFile": "local.docker-compose.yml",
-    "service": "server",
-    "workspaceFolder": "/app",
-    "remoteUser": "root",
+  "dockerComposeFile": "local.docker-compose.yml",
+  "service": "server",
+  "workspaceFolder": "/app",
+  "remoteUser": "root",
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--privileged"
+  ]
 }

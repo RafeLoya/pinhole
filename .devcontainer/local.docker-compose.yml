@@ -1,0 +1,39 @@
+services:
+  server:
+    build:
+      context: ../
+      dockerfile: .devcontainer/local.server.Dockerfile
+      platforms:
+        - linux/arm64
+    container_name: rust-server-dev
+    cap_add:
+      - NET_ADMIN
+    privileged: true
+    ports:
+      - "8080:8080/tcp"
+      - "443:443/udp"
+    # restart: unless-stopped
+    restart: no
+    volumes:
+      # More similar to RustRover default devcontainer behavior
+      - ../:/app
+
+      # More similar to how I have the container set up on GCP
+      # - ../server:/app/server
+      # - ../common:/app/common
+
+      # Mount cargo registry and git to cache dependencies
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+    environment:
+      - RUST_LOG=debug
+    networks:
+      - rust-network
+
+networks:
+  rust-network:
+    driver: bridge
+
+volumes:
+  cargo-registry:
+  cargo-git:
