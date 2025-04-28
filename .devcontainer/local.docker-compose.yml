@@ -1,34 +1,39 @@
-# build:            `docker compose -f .devcontainer/local.docker-compose.yml up --build`
-# enter container:  `docker compose -f .devcontainer/local.docker-compose.yml run --rm server /bin/bash`
-# teardown:         `docker compose -f .devcontainer/local.docker-compose.yml down`
-
 services:
   server:
     build:
       context: ../
-      dockerfile: .devcontainer/server.Dockerfile
+      dockerfile: .devcontainer/local.server.Dockerfile
       platforms:
         - linux/arm64
-    image: rust-server-local
     container_name: rust-server-dev
-    ports:
-      - "8080:8080"
     cap_add:
       - NET_ADMIN
     privileged: true
+    ports:
+      - "8080:8080/tcp"
+      - "443:443/udp"
+    # restart: unless-stopped
+    restart: no
+    volumes:
+      # More similar to RustRover default devcontainer behavior
+      - ../:/app
+
+      # More similar to how I have the container set up on GCP
+      # - ../server:/app/server
+      # - ../common:/app/common
+
+      # Mount cargo registry and git to cache dependencies
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
     environment:
       - RUST_LOG=debug
-      - SERVER_HOST=0.0.0.0
-      - SERVER_PORT=8080
-      - MAX_CONNECTIONS=100
-    volumes:
-      - ../server:/app/server
-      - ../common:/app/common
-    restart: unless-stopped  # Automatically restart if it crashes
     networks:
-      - app-network
-    platform: linux/arm64
+      - rust-network
 
 networks:
-  app-network:
+  rust-network:
     driver: bridge
+
+volumes:
+  cargo-registry:
+  cargo-git:

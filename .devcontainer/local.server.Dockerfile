@@ -1,0 +1,15 @@
+FROM docker.io/acfreeman/rustnetworking
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    lsof iputils-ping \
+    && rm -rf /var/lib/apt/lists/* \
+    && rustup default nightly
+
+COPY . .
+
+EXPOSE 8080/tcp
+EXPOSE 443/udp
+
+CMD ["/bin/sh", "-c", "cargo build --bin server && while sleep 1000; do :; done"]

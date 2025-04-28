@@ -20,6 +20,7 @@ Cargo.lock
 
 # Application ignores
 *.log
+bak/
 
 # We can track this if it allows for reproducible builds and run configs
 .idea/
