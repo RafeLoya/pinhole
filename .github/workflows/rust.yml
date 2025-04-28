@@ -10,15 +10,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test ${{ matrix.package }}
+  build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        package: [common, client, server]
+        project: [client, server, common]
     steps:
     - uses: actions/checkout@v4
-    - name: Build ${{ matrix.package }}
-      run: cargo build --verbose -p ${{ matrix.package }}
-    - name: Run ${{ matrix.package }} tests
-      run: cargo test --verbose -p ${{ matrix.package }}
+
+    - name: Build ${{ matrix.project }}
+      working-directory: ./${{ matrix.project }}
+      run: cargo build --verbose
+
+    - name: Run tests for ${{ matrix.project }}
+      working-directory: ./${{ matrix.project }}
+      run: cargo test --verbose
