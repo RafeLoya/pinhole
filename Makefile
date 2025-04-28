@@ -32,7 +32,6 @@ help: ## Help function
 .PHONY: up, down, enter, clean
 
 up: ## [ContMgmt] Build server container (does not run binary)
-	mkdir -p logs target
 	docker compose -f ${COMPOSE_DEV} up server --build -d
 
 down: ## [ContMgmt] Tear down server container

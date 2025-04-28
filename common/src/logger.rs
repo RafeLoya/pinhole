@@ -39,7 +39,7 @@ pub struct LoggerConfig {
 impl Default for LoggerConfig {
     fn default() -> Self {
         LoggerConfig {
-            log_file: "logs/debug.log".to_string(),
+            log_file: "debug.log".to_string(),
             min_level: LogLevel::Debug,
         }
     }
