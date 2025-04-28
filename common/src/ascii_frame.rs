@@ -44,4 +44,8 @@ impl AsciiFrame {
     pub fn chars(&self) -> &[char] {
         &self.chars
     }
+
+    pub fn chars_mut(&mut self) -> &mut [char] {
+        &mut self.chars
+    }
 }

@@ -19,6 +19,7 @@ use crate::video_config::VideoConfig;
 use std::time::Duration;
 use std::thread;
 use std::io;
+use crate::ascii_renderer::AsciiRenderer;
 
 // Fixed frame dimensions
 const ASCII_WIDTH: u16 = 120;
@@ -27,17 +28,16 @@ const ASCII_HEIGHT: u16 = 40;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut config = VideoConfig::new(
-        640,                // Camera width
-        480,                // Camera height
-        ASCII_WIDTH as i32 as usize, // ASCII width
-        ASCII_HEIGHT as i32 as usize, // ASCII height
-        127.50,             // Edge threshold
-        1.5,                // Contrast
-        0.0                 // Brightness
+        640,
+        480,
+        ASCII_WIDTH as i32 as usize,
+        ASCII_HEIGHT as i32 as usize,
+        127.50,
+        1.5,
+        0.0
     );
 
     let mut camera = Camera::new(config.camera_width, config.camera_height)?;
-
     let mut image_frame = ImageFrame::new(config.camera_width, config.camera_height, 3)?;
     let mut ascii_frame = AsciiFrame::new(ASCII_WIDTH as i32 as usize, ASCII_HEIGHT as i32 as usize, ' ')?;
 
@@ -56,80 +56,97 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing_subscriber::fmt::init();
 
-    // Set up UDP socket
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     println!("Local socket bound to: {}", socket.local_addr()?);
 
-    // Define the server address (using the same IP from Makefile)
     let server_addr = "35.226.114.166:4433";
 
-    // Send initial packet to establish communication
-    let init_message = b"init_ascii_stream";
-    socket.send_to(init_message, server_addr)?;
+    socket.send_to(b"init_ascii_stream", server_addr)?;
     println!("Sent initialization packet to {}", server_addr);
 
-    // Calculate the size of each ASCII frame
     let frame_data_size = (ASCII_WIDTH * ASCII_HEIGHT) as usize;
-
-    // Calculate total packet size (4 bytes frame number + data)
     let packet_size = 4 + frame_data_size;
-    println!("Sending frames of size {}x{} ({} bytes per frame)",
-             ASCII_WIDTH, ASCII_HEIGHT, frame_data_size);
 
-    // Main processing loop
-    let mut frame_number = 0;
-    loop {
-        if let Err(e) = camera.capture_frame(&mut image_frame) {
-            eprintln!("Failed while capturing frame: {}", e);
-            break;
-        }
+    let socket_sender = socket.try_clone()?;
+    let socket_receiver = socket; // original for receiving
 
-        if let Err(e) = converter.convert(&image_frame, &mut ascii_frame) {
-            eprintln!("Failed while converting frame: {}", e);
-            break;
-        }
+    // Spawn sender task
+    let sender_task = tokio::spawn(async move {
+        let mut frame_number = 0;
+        loop {
+            if let Err(e) = camera.capture_frame(&mut image_frame) {
+                eprintln!("Capture error: {}", e);
+                break;
+            }
 
-        // Create packet with frame number header and ASCII data
-        let mut packet = Vec::with_capacity(packet_size);
+            if let Err(e) = converter.convert(&image_frame, &mut ascii_frame) {
+                eprintln!("Convert error: {}", e);
+                break;
+            }
 
-        // Add 4-byte frame number header
-        packet.extend_from_slice(&frame_number.to_be_bytes());
+            let mut packet = Vec::with_capacity(packet_size);
+            packet.extend_from_slice(&frame_number.to_be_bytes());
 
-        // Get the ASCII data
-        // We don't need to include width/height since they're fixed and known to the server
-        let ascii_data = ascii_frame.chars().into_vec().collect::<Vec<u8>>();
+            let ascii_data = ascii_frame.chars().into_vec().collect::<Vec<u8>>();
 
-        // Verify the data size matches our expectations
-        if ascii_data.len() != frame_data_size {
-            eprintln!("Warning: ASCII data size mismatch. Expected: {}, Got: {}",
-                      frame_data_size, ascii_data.len());
-        }
+            if ascii_data.len() != frame_data_size {
+                eprintln!("Warning: ASCII data size mismatch. Expected: {}, Got: {}", frame_data_size, ascii_data.len());
+            }
 
-        // Add ASCII frame data
-        packet.extend_from_slice(&ascii_data);
+            packet.extend_from_slice(&ascii_data);
 
-        // Send the packet
-        match socket.send_to(&packet, server_addr) {
-            Ok(bytes_sent) => {
-                if frame_number % 30 == 0 {
-                    println!("Sent frame {} ({} bytes)", frame_number, bytes_sent);
-                }
-            },
-            Err(e) => {
+            if let Err(e) = socket_sender.send_to(&packet, server_addr) {
                 eprintln!("Failed to send frame {}: {}", frame_number, e);
+            } else if frame_number % 30 == 0 {
+                println!("Sent frame {}", frame_number);
+            }
+
+            frame_number += 1;
+
+            // 100 FPS
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    // Spawn receiver task
+    let receiver_task = tokio::spawn(async move {
+        let mut renderer = AsciiRenderer::new().unwrap();
+        let mut buf = vec![0u8; 4096];
+
+        loop {
+            match socket_receiver.recv_from(&mut buf) {
+                Ok((size, _src)) => {
+                    if size < 4 {
+                        continue; // invalid packet
+                    }
+
+                    let frame_number = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]);
+                    let ascii_data = &buf[4..size];
+
+                    if ascii_data.len() != (ASCII_WIDTH as usize * ASCII_HEIGHT as usize) {
+                        eprintln!("Received corrupted frame {}", frame_number);
+                        continue;
+                    }
+
+                    let ascii_chars = ascii_data.iter().map(|&b| b as char).collect::<Vec<char>>();
+                    let mut incoming_frame = AsciiFrame::new(ASCII_WIDTH as usize, ASCII_HEIGHT as usize, ' ').unwrap();
+                    incoming_frame.chars_mut().copy_from_slice(&ascii_chars);
+
+
+                    if let Err(e) = renderer.render(&incoming_frame) {
+                        eprintln!("Render error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Receive error: {}", e);
+                    break;
+                }
             }
         }
+    });
 
-        frame_number += 1;
-
-        // Control frame rate
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    // Send termination message
-    let term_message = b"terminate_stream";
-    let _ = socket.send_to(term_message, server_addr);
-    println!("Sent termination packet");
+    // Wait for both tasks to finish
+    let _ = tokio::try_join!(sender_task, receiver_task);
 
     Ok(())
 }
