@@ -1,7 +1,7 @@
 [package]
 name = "client"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["Group 4"]
 repository = "https://github.com/csi4321/final-project-group4_s25"
 description = "Client for terminal-based video call service with ASCII streaming"
