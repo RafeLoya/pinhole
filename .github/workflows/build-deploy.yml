@@ -3,7 +3,7 @@ name: Build and Deploy Server
 on:
   push:
     branches:
-      - cicd
+      - master
 
 jobs:
   build-and-deploy:
