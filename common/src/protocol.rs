@@ -1,25 +1,27 @@
 use std::error::Error;
+use std::net::SocketAddr;
 use serde::{Serialize, Deserialize};
 use std::time::Instant;
+use bcrypt;
 
 use crate::ascii_frame::AsciiFrame;
 
 pub type UserId = String;
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NetFrame {
+pub struct VideoFrame {
     /// Width of frame
     pub w: usize,
     /// Height of frame
     pub h: usize,
-    /// Data (characters representing 'pixels' of frame)
-    pub data: Vec<char>,
     /// For latency calculation
     pub timestamp: u64,
+    /// Data (characters representing 'pixels' of frame)
+    pub data: Vec<char>,
 }
 
-impl NetFrame {
-    pub fn from_ascii_frame(frame: &AsciiFrame) -> NetFrame {
+impl VideoFrame {
+    pub fn from_ascii_frame(frame: &AsciiFrame) -> VideoFrame {
         let now = Instant::now();
         Self {
             w: frame.w,
@@ -51,9 +53,9 @@ pub enum MessageType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct UserInfo {
-    pub id: UserId,
+pub struct User {
     pub username: String,
+    pub address: SocketAddr,
     pub status: UserStatus,
 }
 
