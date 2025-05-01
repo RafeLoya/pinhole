@@ -99,7 +99,7 @@ fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
             "-f", "dshow",
             "-framerate", "30",
             "-video_size", "640x480",
-            "-pixel_format", "rgb24",
+            "-pixel_format", "rgb24", // change to '-vcodec mjpeg'
             "-i", "video=Webcam",
 
             "-f", "rawvideo",
