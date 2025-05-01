@@ -72,4 +72,38 @@ impl AsciiRenderer {
 
         Ok(())
     }
+    
+    pub fn process_datagram(&mut self, datagram: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
+        if datagram.len() < 16 {
+            return Err("frame too small (size header too small)".into());
+        }
+        
+        let mut w_bytes = [0u8; 8];
+        w_bytes.copy_from_slice(&datagram[0..8]);
+        let w = usize::from_be_bytes(w_bytes);
+        
+        let mut h_bytes = [0u8; 8];
+        h_bytes.copy_from_slice(&datagram[8..16]);
+        let h = usize::from_be_bytes(h_bytes);
+        
+        if w * h + 16 > datagram.len() {
+            return Err(format!(
+                "incomplete frame: expected {} bytes but got {}",
+                w * h,
+                datagram.len() - 16
+            ).into());
+        }
+        
+        // TODO: review this
+        AsciiFrame::from_bytes(w, h, &datagram[16..16 + w * h])
+    }
+    
+    pub fn serialize_frame(frame: &AsciiFrame) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16 + frame.w * frame.h);
+        bytes.extend_from_slice(&frame.w.to_be_bytes());
+        bytes.extend_from_slice(&frame.h.to_be_bytes());
+        bytes.extend_from_slice(&frame.bytes());
+        
+        bytes
+    }
 }
