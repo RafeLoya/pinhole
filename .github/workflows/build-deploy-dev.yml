@@ -3,7 +3,7 @@ name: Build and Deploy Server
 on:
   push:
     branches:
-      - release
+      - release-dev
 
 jobs:
   build-and-deploy:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        runner: [prod]  # Can add more if we want multiple runners
+        runner: [dev]  # Can add more if we want multiple runners
 
     steps:
       - uses: actions/checkout@v3
