@@ -9,6 +9,7 @@ services:
     ports:
       - "8080:8080/tcp"
       - "443:443/udp"
+      - "4433:4433/udp"
     restart: always
     networks:
       - production-network
@@ -18,12 +19,6 @@ services:
     environment:
       - RUST_LOG=info
       - RUST_BACKTRACE=0
-    # Set resource limits
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
 
 networks:
   production-network:

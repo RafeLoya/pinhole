@@ -30,6 +30,7 @@ RUN mkdir -p /app/logs && \
 
 EXPOSE 8080/tcp
 EXPOSE 443/udp
+EXPOSE 4433/udp
 
 USER appuser
 

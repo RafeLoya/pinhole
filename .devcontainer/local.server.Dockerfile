@@ -11,5 +11,6 @@ COPY . .
 
 EXPOSE 8080/tcp
 EXPOSE 443/udp
+EXPOSE 4433/udp
 
 CMD ["/bin/sh", "-c", "cargo build --bin server && while sleep 1000; do :; done"]
