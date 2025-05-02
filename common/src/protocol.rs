@@ -7,6 +7,7 @@ use bcrypt;
 use crate::ascii_frame::AsciiFrame;
 
 pub type UserId = String;
+pub type UserInfo = String;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct VideoFrame {
