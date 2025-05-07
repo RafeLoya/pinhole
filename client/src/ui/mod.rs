@@ -1,48 +1,66 @@
-pub mod main_menu;
-pub mod user_list;
-pub mod stats;
-
+mod main_menu;
+mod stats;
+mod user_list;
 mod utils;
 
-use crate::app::{App, AppState, UserAction};
+use crossterm::{
+    execute,
+    terminal::{enable_raw_mode, disable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, Clear, ClearType},
+    cursor::{Hide, Show},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+};
 use ratatui::{
     backend::CrosstermBackend,
     Terminal,
 };
-use std::io;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use std::io::{self, stdout, Write};
+use std::time::Duration;
+use crate::app::{App, AppState, UserAction};
 
 pub fn run_ui() -> Result<UserAction, io::Error> {
+    // ✅ Step 1: Prompt for username before starting the TUI
+    println!("Enter your username (leave blank for 'Anonymous'):");
+    let mut username_input = String::new();
+    io::stdin().read_line(&mut username_input)?;
+    let username = username_input.trim();
+    let final_username = if username.is_empty() {
+        "Anonymous".to_string()
+    } else {
+        username.to_string()
+    };
+    while event::poll(Duration::from_millis(0))? {
+        let _ = event::read();
+    }
+
+    // ✅ Step 2: Setup TUI
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let mut stdout = stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture, Hide)?;
+    execute!(stdout, Clear(ClearType::All))?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // ✅ Cleanup guard to restore terminal always
-    struct CleanupGuard;
-    impl Drop for CleanupGuard {
+    struct Cleanup;
+    impl Drop for Cleanup {
         fn drop(&mut self) {
             let _ = disable_raw_mode();
             let _ = execute!(
                 std::io::stdout(),
                 LeaveAlternateScreen,
-                DisableMouseCapture
+                DisableMouseCapture,
+                Show
             );
-            let _ = Terminal::new(CrosstermBackend::new(std::io::stdout()))
-                .and_then(|mut term| term.show_cursor());
         }
     }
-    let _cleanup_guard = CleanupGuard;
+    let _cleanup = Cleanup;
 
-    // Create app state
+    // ✅ Step 3: Create app with the username
     let mut app = App::new();
+    app.username = Some(final_username);  // set username here
+    app.app_state = AppState::MainMenu;   // no EnterUsername state needed anymore
 
+    // ✅ Step 4: Main TUI loop
     loop {
         terminal.draw(|f| {
             let size = f.size();
@@ -56,22 +74,20 @@ pub fn run_ui() -> Result<UserAction, io::Error> {
             let inner_area = background.inner(size);
             f.render_widget(background, size);
 
-            // Route to correct UI module based on app state
             match &app.app_state {
                 AppState::MainMenu => {
                     main_menu::render_main_menu(f, &mut app, inner_area);
-                },
+                }
                 AppState::UserList => {
                     user_list::render_user_list(f, &mut app, inner_area);
-                },
+                }
                 AppState::ViewStats => {
                     stats::render_stats(f, &mut app, inner_area);
                 }
             }
         })?;
 
-        // Handle key events
-        if event::poll(std::time::Duration::from_millis(200))? {
+        if event::poll(Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
                 match app.app_state {
                     AppState::MainMenu => match key.code {
@@ -90,7 +106,7 @@ pub fn run_ui() -> Result<UserAction, io::Error> {
                                     }
                                     2 => {
                                         app.last_action = Some(UserAction::Quit);
-                                        return Ok(UserAction::Quit);  // 👈 Clean exit
+                                        return Ok(UserAction::Quit);
                                     }
                                     _ => {}
                                 }

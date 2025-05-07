@@ -23,6 +23,11 @@ pub fn render_main_menu(
         ])
         .split(area);
 
+    let username_display = match &app.username {
+        Some(name) => name.as_str(),
+        None => "Anonymous",
+    };
+
     // Status bar at top
     let status = Paragraph::new(
         Line::from(vec![
@@ -32,7 +37,9 @@ pub fn render_main_menu(
             Span::styled("↑↓", Style::default().fg(Color::Yellow)),
             Span::raw(" to navigate | "),
             Span::styled("Enter", Style::default().fg(Color::Yellow)),
-            Span::raw(" to select"),
+            Span::raw(" to select | "),
+            Span::styled("User: ", Style::default().fg(Color::Cyan)),
+            Span::styled(username_display, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ])
     )
         .alignment(Alignment::Left)

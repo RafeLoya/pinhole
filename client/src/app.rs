@@ -32,6 +32,7 @@ pub struct App {
     pub online_users: Vec<MockUser>,
     pub last_action: Option<UserAction>,
     pub network_info: NetworkInfo,
+    pub username: Option<String>,  // ✅ keeps the final username
 }
 
 impl App {
@@ -51,14 +52,18 @@ impl App {
             MockUser { username: "Eve".to_string(), status: "Available".to_string() },
         ];
 
-        App {
+        let mut app = App {
             menu_state,
             users_state,
             app_state: AppState::MainMenu,
             online_users,
             last_action: None,
             network_info: NetworkInfo::new(),
-        }
+            username: None,  // ✅ Will be set before TUI starts
+        };
+
+        let _ = app.network_info.get_network_info();  // refresh IP at startup
+        app
     }
 
     // Navigate menu (MainMenu)
