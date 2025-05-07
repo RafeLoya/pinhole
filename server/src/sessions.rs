@@ -16,7 +16,7 @@ pub struct Session {
     pub client_1_udp: Option<SocketAddr>,
     pub client_2_udp: Option<SocketAddr>,
     /// TCP -> UDP
-    pub udp_addrs: HashMap<SocketAddr, SocketAddr>
+    pub udp_addrs: HashMap<SocketAddr, SocketAddr>,
 }
 
 impl Session {
@@ -49,10 +49,10 @@ impl Session {
     pub fn add_client(&mut self, addr: SocketAddr, tx: mpsc::UnboundedSender<Message>) -> bool {
         if self.client_1.is_none() {
             self.client_1 = Some((addr, tx));
-            return true
-        } else if  self.client_2.is_none() {
+            return true;
+        } else if self.client_2.is_none() {
             self.client_2 = Some((addr, tx));
-            return true
+            return true;
         }
 
         false
@@ -65,8 +65,9 @@ impl Session {
     /// Associates client's TCP address w/ its UDP address
     pub fn register_udp(&mut self, tcp_addr: &SocketAddr, udp_port: u16) -> bool {
         // Check if the TCP address exists in this session
-        let is_client_in_session = (self.client_1.is_some() && self.client_1.as_ref().unwrap().0 == *tcp_addr) ||
-            (self.client_2.is_some() && self.client_2.as_ref().unwrap().0 == *tcp_addr);
+        let is_client_in_session = (self.client_1.is_some()
+            && self.client_1.as_ref().unwrap().0 == *tcp_addr)
+            || (self.client_2.is_some() && self.client_2.as_ref().unwrap().0 == *tcp_addr);
 
         if !is_client_in_session {
             // Can't register UDP for a client that's not in this session
@@ -82,8 +83,6 @@ impl Session {
         self.udp_addrs.insert(*tcp_addr, udp_addr);
         true
     }
-
-
 
     /// Returns peer's message channel for given client
     pub fn get_peer_tx(&self, addr: &SocketAddr) -> Option<mpsc::UnboundedSender<Message>> {
@@ -132,7 +131,7 @@ pub struct SessionManager {
     pub sessions: HashMap<String, Session>,
     /// reverse map of client addresses -> session ID
     pub client_sessions: HashMap<SocketAddr, String>,
-    pub udp_to_tcp: HashMap<SocketAddr, SocketAddr>
+    pub udp_to_tcp: HashMap<SocketAddr, SocketAddr>,
 }
 
 impl SessionManager {
@@ -140,7 +139,7 @@ impl SessionManager {
         Self {
             sessions: HashMap::new(),
             client_sessions: HashMap::new(),
-            udp_to_tcp: HashMap::new()
+            udp_to_tcp: HashMap::new(),
         }
     }
 
@@ -149,11 +148,17 @@ impl SessionManager {
             return false;
         }
 
-        self.sessions.insert(session_id.clone(), Session::new(session_id));
+        self.sessions
+            .insert(session_id.clone(), Session::new(session_id));
         true
     }
 
-    pub fn add_client_to_session(&mut self, session_id: &str, addr: SocketAddr, tx: mpsc::UnboundedSender<Message>) -> bool {
+    pub fn add_client_to_session(
+        &mut self,
+        session_id: &str,
+        addr: SocketAddr,
+        tx: mpsc::UnboundedSender<Message>,
+    ) -> bool {
         if let Some(session) = self.sessions.get_mut(session_id) {
             if session.add_client(addr, tx) {
                 println!("added client {} to session {}", addr, session_id);

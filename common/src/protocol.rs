@@ -1,8 +1,8 @@
+use bcrypt;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::net::SocketAddr;
-use serde::{Serialize, Deserialize};
 use std::time::Instant;
-use bcrypt;
 
 use crate::ascii_frame::AsciiFrame;
 
@@ -31,10 +31,10 @@ impl VideoFrame {
             timestamp: now.elapsed().as_micros() as u64,
         }
     }
-    
+
     pub fn to_ascii_frame(&self) -> Result<AsciiFrame, Box<dyn Error>> {
         let mut frame = AsciiFrame::new(self.w, self.h, ' ')?;
-        
+
         for y in 0..self.h {
             for x in 0..self.w {
                 let i = y * self.w + x;
@@ -43,15 +43,13 @@ impl VideoFrame {
                 }
             }
         }
-        
+
         Ok(frame)
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum MessageType {
-    
-}
+pub enum MessageType {}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct User {
@@ -60,11 +58,11 @@ pub struct User {
     pub status: UserStatus,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug,  PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum UserStatus {
     Online,
     InCall,
-    Offline
+    Offline,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

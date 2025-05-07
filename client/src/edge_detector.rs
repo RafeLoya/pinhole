@@ -46,9 +46,7 @@ impl EdgeDetector {
             h,
         }));
 
-        let frame_buffer =  Arc::new(Mutex::new(
-            Vec::<u8>::with_capacity(w * h * 3))
-        );
+        let frame_buffer = Arc::new(Mutex::new(Vec::<u8>::with_capacity(w * h * 3)));
         let new_frame_available = Arc::new(Mutex::new(false));
         let running = Arc::new(Mutex::new(true));
 
@@ -57,7 +55,7 @@ impl EdgeDetector {
             frame_buffer,
             new_frame_available,
             threshold,
-            running
+            running,
         }
     }
 
@@ -72,7 +70,11 @@ impl EdgeDetector {
     ///
     /// `JoinHandle` for the edge detection processing thread, to manage
     /// or complete its lifetime.
-    pub fn start(&self, cam_w: usize, cam_h: usize) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
+    pub fn start(
+        &self,
+        cam_w: usize,
+        cam_h: usize,
+    ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
         let edge_info = Arc::clone(&self.edge_info);
         let frame_buffer = Arc::clone(&self.frame_buffer);
         let new_frame_flag = Arc::clone(&self.new_frame_available);
@@ -128,7 +130,10 @@ impl EdgeDetector {
 
     /// Using the Sobel operator, processes an image frame fo edge detection
     /// after retrieving the grayscale intensity map
-    fn process_frame(frame: &ImageFrame, threshold: f32) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
+    fn process_frame(
+        frame: &ImageFrame,
+        threshold: f32,
+    ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
         let intensity = Self::create_intensity_map(frame);
         let (gx, gy) = Self::sobel(&intensity, frame.w, frame.h);
 
@@ -144,13 +149,8 @@ impl EdgeDetector {
         }
 
         // thin edges & remove edges that are most likely just noise
-        let magnitude = Self::non_maximum_suppression(
-            &magnitude,
-            &angle,
-            frame.w,
-            frame.h,
-            threshold
-        );
+        let magnitude =
+            Self::non_maximum_suppression(&magnitude, &angle, frame.w, frame.h, threshold);
 
         Ok((magnitude, angle))
     }
@@ -171,7 +171,7 @@ impl EdgeDetector {
         *running = false;
     }
 
-    /// Extracts intensity values from an RGB image to be used 
+    /// Extracts intensity values from an RGB image to be used
     /// for edge detection
     fn create_intensity_map(frame: &ImageFrame) -> Vec<f32> {
         let mut intensity = vec![0.0; frame.w * frame.h];
@@ -204,21 +204,19 @@ impl EdgeDetector {
                 let i = y * w + x;
 
                 // skipping over entries w/ 0 due to initialization
-                gx[i] =
-                    -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gx(0,0)
+                gx[i] = -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gx(0,0)
                         1.0 * intensity[(y - 1) * w + (x + 1)] +  // Gx(0,2)
                         -2.0 * intensity[y * w + (x - 1)] +       // Gx(1,0)
                         2.0 * intensity[y * w + (x + 1)] +        // Gx(1,2)
                         -1.0 * intensity[(y + 1) * w + (x - 1)] + // Gx(2,0)
-                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gx(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gx(2,2)
 
-                gy[i] =
-                    -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gy(0,0)
+                gy[i] = -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gy(0,0)
                         -2.0 * intensity[(y - 1) * w + x] +       // Gy(0,1)
                         -1.0 * intensity[(y - 1) * w + (x + 1)] + // Gy(0,2)
                         1.0 * intensity[(y + 1) * w + (x - 1)] +  // Gy(2,0)
                         2.0 * intensity[(y + 1) * w + x] +        // Gy(2,1)
-                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gy(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gy(2,2)
             }
         }
 
@@ -227,13 +225,19 @@ impl EdgeDetector {
 
     /// Performs non-maximum suppression on a gradient magnitude to thin edges.
     ///
-    /// By examining each pixel and its neighbors along the gradient direction, 
-    /// the function determines a local maximum. Only pixels that meet / exceed 
+    /// By examining each pixel and its neighbors along the gradient direction,
+    /// the function determines a local maximum. Only pixels that meet / exceed
     /// the local maximum and exceed the threshold are preserved.
     ///
     /// This will reduce the thickness of edges to a single-pixel width and
     /// remove edge points that are more than likely noise.
-    fn non_maximum_suppression(magnitude: &[f32], angle: &[f32], w: usize, h: usize, threshold: f32) -> Vec<f32> {
+    fn non_maximum_suppression(
+        magnitude: &[f32],
+        angle: &[f32],
+        w: usize,
+        h: usize,
+        threshold: f32,
+    ) -> Vec<f32> {
         let mut result = vec![0.0; w * h];
 
         for y in 1..(h - 1) {
@@ -248,18 +252,20 @@ impl EdgeDetector {
                 // normalize to 0-180 degrees
                 let angle_deg = (angle[i].to_degrees() + 180.0) % 180.0;
 
-                let (nx1, ny1, nx2, ny2) = if (angle_deg >= 0.0 && angle_deg < 22.5) || (angle_deg >= 157.5 && angle_deg < 180.0) {
+                let (nx1, ny1, nx2, ny2) = if (angle_deg >= 0.0 && angle_deg < 22.5)
+                    || (angle_deg >= 157.5 && angle_deg < 180.0)
+                {
                     // horizontal edge
-                    (x+1, y, x-1, y)
+                    (x + 1, y, x - 1, y)
                 } else if angle_deg >= 22.5 && angle_deg < 67.5 {
                     // forward edge (/)
-                    (x+1, y-1, x-1, y+1)
+                    (x + 1, y - 1, x - 1, y + 1)
                 } else if angle_deg >= 67.5 && angle_deg < 112.5 {
                     // vertical edge
-                    (x, y-1, x, y+1)
+                    (x, y - 1, x, y + 1)
                 } else {
                     // back edge (\)
-                    (x-1, y-1, x+1, y+1)
+                    (x - 1, y - 1, x + 1, y + 1)
                 };
 
                 // compare with neighboring values

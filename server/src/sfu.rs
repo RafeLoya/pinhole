@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task;
 
-use common::logger::Logger;
 use crate::sessions::{Message, SessionManager};
+use common::logger::Logger;
 
 // TODO: JSON structuring vs regular sentence!
 
@@ -26,13 +26,7 @@ pub struct SFU {
 }
 
 impl SFU {
-    pub fn new(
-        tcp_addr: String,
-        udp_addr: String,
-        log_file: String,
-        verbose: bool,
-    ) -> Self {
-
+    pub fn new(tcp_addr: String, udp_addr: String, log_file: String, verbose: bool) -> Self {
         Self {
             tcp_addr,
             udp_addr,
@@ -67,14 +61,19 @@ impl SFU {
 
         // UDP handler
         task::spawn(async move {
-            if let Err(e) = Self::handle_udp_frames(udp_socket, udp_session_manager, udp_logger).await {
+            if let Err(e) =
+                Self::handle_udp_frames(udp_socket, udp_session_manager, udp_logger).await
+            {
                 eprintln!("UDP handler error: {}", e)
             }
         });
 
         // control messages
         let tcp_listener = TcpListener::bind(&self.tcp_addr)?;
-        logger.info(&format!("TCP control channel listening on: {}", self.tcp_addr))?;
+        logger.info(&format!(
+            "TCP control channel listening on: {}",
+            self.tcp_addr
+        ))?;
 
         // accept tcp connections for control channel
         loop {
@@ -85,13 +84,15 @@ impl SFU {
             let tcp_session_manager = self.session_manager.clone();
 
             task::spawn(async move {
-                if let Err(e) = Self::handle_tcp_control(socket, addr, tcp_session_manager, tcp_logger).await {
+                if let Err(e) =
+                    Self::handle_tcp_control(socket, addr, tcp_session_manager, tcp_logger).await
+                {
                     eprintln!("TCP control error for {}: {}", addr, e);
                 }
             });
         }
     }
-    
+
     /// Given a valid received datagram, forward it to the correct client
     /// based on prior TCP-to-UDP registration
     async fn handle_udp_frames(
@@ -99,7 +100,6 @@ impl SFU {
         session_manager: Arc<Mutex<SessionManager>>,
         logger: Logger,
     ) -> Result<(), Box<dyn Error>> {
-
         let mut buf = vec![0u8; 65536];
 
         loop {
@@ -107,7 +107,10 @@ impl SFU {
             println!("received UDP frame from {} ({} bytes)", src, len);
 
             if len < 16 {
-                logger.warn(&format!("received invalid frame size ({} bytes) from {}", len, src))?;
+                logger.warn(&format!(
+                    "received invalid frame size ({} bytes) from {}",
+                    len, src
+                ))?;
                 continue;
             }
 
@@ -131,14 +134,20 @@ impl SFU {
             if let Some(peer_addr) = peer_udp_addr {
                 match socket.send_to(&buf[0..len], peer_addr) {
                     Ok(_) => {
-                        logger.info(&format!("forwarded frame of size {} from {} to {}", len, src, peer_addr))?;
+                        logger.info(&format!(
+                            "forwarded frame of size {} from {} to {}",
+                            len, src, peer_addr
+                        ))?;
                     }
                     Err(e) => {
                         logger.warn(&format!("failed to forward frame to {}: {}", peer_addr, e))?;
                     }
                 }
             } else {
-                logger.warn(&format!("failed to forward frame from {}: no peer found", src))?;
+                logger.warn(&format!(
+                    "failed to forward frame from {}: no peer found",
+                    src
+                ))?;
             }
         }
     }
@@ -151,7 +160,6 @@ impl SFU {
         session_manager: Arc<Mutex<SessionManager>>,
         logger: Logger,
     ) -> Result<(), Box<dyn Error>> {
-
         // channel for sending messages to this client
         let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
@@ -163,17 +171,16 @@ impl SFU {
                     Message::AsciiFrame(_) => {
                         // frame data not sent over TCP
                         continue;
-                    },
+                    }
                     Message::Connect(msg) => {
                         println!("sending CONNECTED to client {}", addr);
                         if let Err(e) = send_socket.write_all(b"CONNECTED\n") {
                             eprintln!("failed to send connect message: {}", e);
                             break;
                         }
-                    },
+                    }
                     Message::Disconnect => {
                         // send disconnect notification
-                        //logger.info("DISCONNECT received").expect("TODO: panic message");
                         if let Err(e) = send_socket.write_all(b"DISCONNECTED\n") {
                             eprintln!("failed to send disconnect message: {}", e);
                             break;
@@ -212,14 +219,14 @@ impl SFU {
 
                     // create the session if it doesn't exist
                     {
-                        let mut sm  = session_manager.lock().unwrap();
+                        let mut sm = session_manager.lock().unwrap();
                         sm.create_session(session_id.to_string());
                     }
 
                     // attempt to join session
                     let join_result = {
-                        let mut sm =  session_manager.lock().unwrap();
-                        sm.add_client_to_session(session_id, addr,  tx.clone())
+                        let mut sm = session_manager.lock().unwrap();
+                        sm.add_client_to_session(session_id, addr, tx.clone())
                     };
 
                     if join_result {
@@ -228,23 +235,29 @@ impl SFU {
 
                         // notify peer about connection
                         {
-                            let sm =  session_manager.lock().unwrap();
+                            let sm = session_manager.lock().unwrap();
                             if let Some(session) = sm.get_session_for_client(&addr) {
                                 if let Some(peer_tx) = session.get_peer_tx(&addr) {
-                                    println!("sending CONNECTED notification from {} to peer", addr);
+                                    println!(
+                                        "sending CONNECTED notification from {} to peer",
+                                        addr
+                                    );
                                     let _ = peer_tx.send(Message::Connect(session_id.to_string()));
                                 }
                             }
                         }
                     } else {
-                        logger.warn(&format!("client {} failed to join client session {}", addr, session_id))?;
+                        logger.warn(&format!(
+                            "client {} failed to join client session {}",
+                            addr, session_id
+                        ))?;
                         socket.write_all(b"ERROR: failed to join session\n")?;
                     }
-                },
+                }
                 "LEAVE" => {
                     // remove client from its session
                     {
-                        let mut sm  = session_manager.lock().unwrap();
+                        let mut sm = session_manager.lock().unwrap();
 
                         // notify peer about disconnect
                         if let Some(session) = sm.get_session_for_client(&addr) {
@@ -258,7 +271,7 @@ impl SFU {
 
                     logger.info(&format!("client {} left session", addr))?;
                     socket.write_all(b"OK: left session\n")?;
-                },
+                }
                 "REGISTER_UDP" => {
                     if parts.len() < 2 {
                         socket.write_all(b"ERROR: usage: REGISTER_UDP <port>\n")?;
@@ -296,7 +309,7 @@ impl SFU {
 
         // clean up after closed connection
         {
-            let mut sm  = session_manager.lock().unwrap();
+            let mut sm = session_manager.lock().unwrap();
 
             if let Some(session) = sm.get_session_for_client(&addr) {
                 if let Some(peer_tx) = session.get_peer_tx(&addr) {

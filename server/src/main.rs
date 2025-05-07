@@ -8,7 +8,7 @@ use std::error::Error;
 /// Simple TCP/UDP server with configurable logging
 ///
 /// If you want to test locally, can simply use:
-/// 
+///
 /// ```bash
 /// cargo run --bin server
 /// ```
@@ -33,7 +33,7 @@ struct Args {
 }
 
 /// Entry point for ASCII video SFU server (codename "Pinhole")
-/// 
+///
 /// Launches TCP and UDP listeners, where
 /// - TCP is used for control messages, managing session state and other logic
 /// (e.g. JOIN, LEAVE, etc.)
@@ -42,15 +42,10 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let args = Args::parse();
-    
-    let server = SFU::new(
-        args.tcp_addr,
-        args.udp_addr,
-        args.log_file,
-        args.verbose,
-    );
-    
+
+    let server = SFU::new(args.tcp_addr, args.udp_addr, args.log_file, args.verbose);
+
     server.run().await?;
-    
+
     Ok(())
 }

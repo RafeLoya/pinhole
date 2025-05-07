@@ -28,35 +28,35 @@ impl AsciiFrame {
     }
 
     pub fn from_bytes(w: usize, h: usize, bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
-        if  w == 0 || h == 0 {
+        if w == 0 || h == 0 {
             return Err("dimensions must be greater than zero".into());
         }
-        
+
         if bytes.len() < w * h {
             return Err(format!(
                 "not enough data: expected {} chars but got {}",
                 w * h,
                 bytes.len()
-            ).into());
+            )
+            .into());
         }
-        
+
         let mut frame = Self {
             w,
             h,
             chars: vec![' '; w * h],
         };
-        
+
         // TODO: is this faster? iterating vs. iter than memcpy?
         // for i in 0..w * h {
         //     frame.chars[i] = bytes[i] as char;
         // }
         let ascii: Vec<char> = bytes.iter().map(|&b| b as char).collect();
         frame.chars.copy_from_slice(&ascii);
-        
+
         Ok(frame)
     }
-    
-    
+
     pub fn set_char(&mut self, x: usize, y: usize, c: char) -> bool {
         if x >= self.w || y >= self.h {
             return false;
@@ -79,23 +79,23 @@ impl AsciiFrame {
         self.chars[0..data.len()].copy_from_slice(data);
         true
     }
-    
+
     pub fn set_chars_from_bytes(&mut self, bytes: &[u8]) -> bool {
         if bytes.len() > self.chars.len() {
             return false;
         }
-        
+
         let ascii: Vec<char> = bytes.iter().map(|&b| b as char).collect();
         self.chars[0..bytes.len()].copy_from_slice(&ascii);
-        
+
         true
     }
-    
+
     pub fn set_chars_from_vec(&mut self, data: Vec<char>) -> bool {
         if data.len() > self.chars.len() {
             return false;
         }
-        
+
         self.chars[0..data.len()].copy_from_slice(&data);
         true
     }
@@ -103,18 +103,18 @@ impl AsciiFrame {
     pub fn chars(&self) -> &[char] {
         &self.chars
     }
-    
+
     pub fn chars_mut(&mut self) -> &mut [char] {
         &mut self.chars
     }
-    
+
     pub fn bytes(&self) -> Vec<u8> {
         let mut bytes: Vec<u8> = Vec::with_capacity(self.chars.len());
-        
+
         for &c in &self.chars {
             bytes.push(c as u8);
         }
-        
+
         bytes
     }
 }

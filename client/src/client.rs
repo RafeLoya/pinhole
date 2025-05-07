@@ -1,3 +1,10 @@
+use crate::ascii_converter::AsciiConverter;
+use crate::ascii_renderer::AsciiRenderer;
+use crate::camera::Camera;
+use crate::image_frame::ImageFrame;
+use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
+use crate::video_config::VideoConfig;
+use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{TcpStream, UdpSocket};
@@ -5,13 +12,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task;
-use common::ascii_frame::AsciiFrame;
-use crate::ascii_converter::AsciiConverter;
-use crate::ascii_renderer::AsciiRenderer;
-use crate::camera::Camera;
-use crate::image_frame::ImageFrame;
-use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
-use crate::video_config::VideoConfig;
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
@@ -28,11 +28,16 @@ pub struct Client {
     /// Does client have another peer client in their session?
     has_peer: Arc<Mutex<bool>>,
     /// Optionally, pattern can be used instead of camera
-    test_pattern: Option<PatternType>
+    test_pattern: Option<PatternType>,
 }
 
 impl Client {
-    pub fn new(server_tcp_addr: String, server_udp_addr: String, session_id: String, test_pattern: Option<PatternType>) -> Self {
+    pub fn new(
+        server_tcp_addr: String,
+        server_udp_addr: String,
+        session_id: String,
+        test_pattern: Option<PatternType>,
+    ) -> Self {
         Self {
             server_tcp_addr,
             server_udp_addr,
@@ -58,14 +63,17 @@ impl Client {
         let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
         let local_udp_addr = udp_socket.local_addr()?;
         udp_socket.connect(&self.server_udp_addr)?;
-        println!("UDP socket bound to {} and connected to {}", local_udp_addr, self.server_udp_addr);
+        println!(
+            "UDP socket bound to {} and connected to {}",
+            local_udp_addr, self.server_udp_addr
+        );
 
         let join_cmd = format!("JOIN {}\n", self.session_id);
         tcp_stream.write_all(join_cmd.as_bytes())?;
 
         // wait for OK
         let mut response = [0u8; 1024];
-        let n =  tcp_stream.read(&mut response)?;
+        let n = tcp_stream.read(&mut response)?;
         let response = std::str::from_utf8(&response[..n])?;
 
         if !response.starts_with("OK") {
@@ -87,13 +95,15 @@ impl Client {
 
         println!("Registering UDP port {} with server", local_udp_addr.port());
 
-        {
-            let mut connected = self.is_connected.lock().unwrap();
-            *connected = true;
-        }
+        // {
+        //     let mut connected = self.is_connected.lock().unwrap();
+        //     *connected = true;
+        // }
 
         println!("joined session: {}", self.session_id);
 
+        // TODO: WHY is this required???
+        // required due to deadlock :(
         {
             let mut connected = self.is_connected.lock().unwrap();
             *connected = true;
@@ -107,6 +117,7 @@ impl Client {
         let udp_socket = Arc::new(udp_socket);
         let tcp_stream = Arc::new(Mutex::new(tcp_stream));
 
+        // tcp control messages
         let tcp_task = {
             let is_connected = self.is_connected.clone();
             let has_peer = self.has_peer.clone();
@@ -119,54 +130,54 @@ impl Client {
             })
         };
 
+        // ASCII rendering
         let render_task = {
             let udp_socket = udp_socket.clone();
             let is_connected = self.is_connected.clone();
             let has_peer = self.has_peer.clone();
 
             task::spawn(async move {
-                if let Err(e) = Self::receive_and_deserialize_frames(udp_socket, is_connected, has_peer).await {
+                if let Err(e) =
+                    Self::receive_and_deserialize_frames(udp_socket, is_connected, has_peer).await
+                {
                     eprintln!("render error: {}", e)
                 }
             })
         };
 
+        // ASCII frame capture
         let capture_task = {
             let udp_socket = udp_socket.clone();
             let is_connected = self.is_connected.clone();
             let has_peer = self.has_peer.clone();
 
             task::spawn(async move {
-                if let Err(e) = Self::capture_and_serialize_frames(udp_socket, frame_rx, is_connected, has_peer).await {
+                if let Err(e) =
+                    Self::capture_and_serialize_frames(udp_socket, frame_rx, is_connected, has_peer)
+                        .await
+                {
                     eprintln!("capture error: {}", e)
                 }
             })
         };
 
-        // WEBCAM LOGIC
-        //=====================================================================
-        let config = VideoConfig::new(
-            640,
-            480,
-            120,
-            40,
-            127.50,
-            1.5,
-            0.0
-        );
+        //=======================WEBCAM LOGIC================================//
 
-        println!("connection status: connected={}\nhas_peer={}",
-                 *self.is_connected.lock().unwrap(),
-                 *self.has_peer.lock().unwrap());
+        let config = VideoConfig::new(640, 480, 120, 40, 127.50, 1.5, 0.0);
+
+        println!(
+            "connection status: connected={}\nhas_peer={}",
+            *self.is_connected.lock().unwrap(),
+            *self.has_peer.lock().unwrap()
+        );
         if let Some(pattern) = &self.test_pattern {
             let pattern_val = match pattern {
                 PatternType::Checkerboard => PatternType::Checkerboard,
                 &PatternType::MovingLine => PatternType::MovingLine,
             };
 
-            let mut frame_gen = MockFrameGenerator::new(
-                config.ascii_width, config.ascii_height, 30, pattern_val
-            )?;
+            let mut frame_gen =
+                MockFrameGenerator::new(config.ascii_width, config.ascii_height, 30, pattern_val)?;
 
             while *self.is_connected.lock().unwrap() {
                 if *self.has_peer.lock().unwrap() {
@@ -201,7 +212,7 @@ impl Client {
                 config.camera_height,
                 config.edge_threshold,
                 config.contrast,
-                config.brightness
+                config.brightness,
             )?;
 
             while *self.is_connected.lock().unwrap() {
@@ -216,7 +227,8 @@ impl Client {
                         continue;
                     }
 
-                    let mut frame_to_send = AsciiFrame::new(config.ascii_width, config.ascii_height, ' ')?;
+                    let mut frame_to_send =
+                        AsciiFrame::new(config.ascii_width, config.ascii_height, ' ')?;
                     frame_to_send.set_chars_from_bytes(&ascii_frame.bytes());
                     if let Err(e) = frame_tx.try_send(frame_to_send) {
                         eprintln!("failed to send ascii frame: {}", e);
@@ -227,8 +239,9 @@ impl Client {
                 tokio::time::sleep(Duration::from_millis(33)).await;
                 //std::thread::sleep(std::time::Duration::from_millis(33));
             }
-            //=====================================================================
         }
+
+        //===================================================================//
 
         // clean up
         let mut tcp = tcp_stream.lock().unwrap();
@@ -243,14 +256,13 @@ impl Client {
 
     /// Reads control messages from server, updating local state about
     /// session connection and / or peer presence.
-    /// 
+    ///
     /// Exits if connection is dropped.
     async fn handle_tcp_control(
         tcp_stream: Arc<Mutex<TcpStream>>,
         is_connected: Arc<Mutex<bool>>,
         has_peer: Arc<Mutex<bool>>,
     ) -> Result<(), Box<dyn Error>> {
-
         let mut buffer = [0u8; 1024];
 
         {
@@ -305,7 +317,6 @@ impl Client {
         is_connected: Arc<Mutex<bool>>,
         has_peer: Arc<Mutex<bool>>,
     ) -> Result<(), Box<dyn Error>> {
-
         let mut renderer = AsciiRenderer::new()?;
         let mut buffer = vec![0u8; 65536];
 
@@ -321,11 +332,11 @@ impl Client {
                 Ok(n) => {
                     //println!("received datagram of size: {}", n);
                     n
-                },
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                     continue;
-                },
+                }
                 Err(e) => return Err(e.into()),
             };
 
@@ -338,7 +349,7 @@ impl Client {
                     } else {
                         //println!("rendered frame");
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("failed to process frame: {}", e);
                     continue;
@@ -357,7 +368,6 @@ impl Client {
         is_connected: Arc<Mutex<bool>>,
         has_peer: Arc<Mutex<bool>>,
     ) -> Result<(), Box<dyn Error>> {
-
         while *is_connected.lock().unwrap() {
             // check for peer
             if !*has_peer.lock().unwrap() {
@@ -366,14 +376,12 @@ impl Client {
             }
 
             // get next frame
-            let frame = match tokio::time::timeout(
-                Duration::from_millis(100),
-                frame_rx.recv()
-            ).await {
-                Ok(Some(frame)) => frame,
-                Ok(None) => break,  // channel closed
-                Err(_) => continue, // timeout, retry
-            };
+            let frame =
+                match tokio::time::timeout(Duration::from_millis(100), frame_rx.recv()).await {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => break,  // channel closed
+                    Err(_) => continue, // timeout, retry
+                };
 
             let data = AsciiRenderer::serialize_frame(&frame);
             //println!("sending frame of size: {}", data.len());
@@ -381,7 +389,7 @@ impl Client {
             match udp_socket.send(&data) {
                 Ok(_) => {
                     //println!("sending frame of size: {}", data.len());
-                },
+                }
                 Err(e) => {
                     eprintln!("failed to send frame: {}", e);
                     continue;

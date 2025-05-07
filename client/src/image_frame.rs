@@ -1,8 +1,8 @@
-use std::error::Error;
 use crate::ascii_converter::{B_LUMINANCE, G_LUMINANCE, R_LUMINANCE};
+use std::error::Error;
 
 /// Initial frame received from webcam feed
-pub struct ImageFrame{
+pub struct ImageFrame {
     pub w: usize,
     pub h: usize,
     /// usually 3 (RGB)
@@ -11,7 +11,7 @@ pub struct ImageFrame{
     pub buffer: Vec<u8>,
 }
 
-impl ImageFrame{
+impl ImageFrame {
     pub fn new(w: usize, h: usize, bytes_per_pixel: usize) -> Result<Self, Box<dyn Error>> {
         if w == 0 || h == 0 || bytes_per_pixel == 0 {
             return Err("width, height, and bytes per pixel must be greater than zero".into());
@@ -39,15 +39,11 @@ impl ImageFrame{
         }
 
         let i = (y * self.w + x) * self.bytes_per_pixel;
-        if i + 2 >=  self.buffer.len() {
+        if i + 2 >= self.buffer.len() {
             return None;
         }
 
-        Some((
-            self.buffer[i],
-            self.buffer[i + 1],
-            self.buffer[i + 2],
-        ))
+        Some((self.buffer[i], self.buffer[i + 1], self.buffer[i + 2]))
     }
 
     /// calculate the grayscale intensity value (relative luminance)
