@@ -74,37 +74,41 @@ impl Client {
         // establish TCP socket
         let tcp_stream = TcpStream::connect(&self.server_tcp_addr).await?;
         let (mut tcp_rd, mut tcp_wr) = tcp_stream.into_split();
-        println!("Connected to server at {}", &self.server_tcp_addr);
+        
+        //println!("Connected to server at {}", &self.server_tcp_addr);
 
         // establish UDP socket
         let udp_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
         let local_udp_addr = udp_socket.local_addr()?;
         udp_socket.connect(&self.server_udp_addr).await?;
-        println!(
-            "UDP socket bound to {} and connected to {}",
-            local_udp_addr, self.server_udp_addr
-        );
+        
+        // println!(
+        //     "UDP socket bound to {} and connected to {}",
+        //     local_udp_addr, self.server_udp_addr
+        // );
 
-        // session handshake (JOIN + REGISTER_UDP)
+        // === SESSION HANDSHAKE (JOIN + REGISTER_UDP) ============================================
+        // Sends JOIN request to server to either create a new session or
+        // join a preexisting one
         tcp_wr
             .write_all(format!("JOIN {}\n", self.session_id).as_bytes())
             .await?;
         Self::expect_ok(&mut tcp_rd).await?;
-        println!("JOIN received by server for session {}", self.session_id);
+        // println!("JOIN received by server for session {}", self.session_id);
         tcp_wr
             .write_all(format!("REGISTER_UDP {}\n", local_udp_addr.port()).as_bytes())
             .await?;
         Self::expect_ok(&mut tcp_rd).await?;
-        println!(
-            "Registered UDP port {} with server for session {}",
-            local_udp_addr.port(),
-            self.session_id
-        );
+        // println!(
+        //     "Registered UDP port {} with server for session {}",
+        //     local_udp_addr.port(),
+        //     self.session_id
+        // );
 
         // update our session status to connected
         let _ = self.conn_flag_tx.send(true);
 
-        println!("joined session: {}", self.session_id);
+        // println!("joined session: {}", self.session_id);
 
         // TODO: how large should buffer be?
         // EXPERIMENTAL: target FPS * worst consumer lag in seconds
@@ -137,7 +141,7 @@ impl Client {
 
                 match &buf[..n] {
                     msg if msg.starts_with(b"CONNECTED") => {
-                        println!("CONTROL: got CONNECTED");
+                        //println!("CONTROL: got CONNECTED");
                         let _ = ctrl_peer_tx.send(true);
                     }
                     msg if msg.starts_with(b"DISCONNECTED") => {
@@ -188,18 +192,18 @@ impl Client {
                 if let Some(frame) = frame_rx.recv().await {
                     let data = AsciiRenderer::serialize_frame(&frame);
                     let _ = udp_send.send(&data).await;
-                    println!("CLIENT: sent {} bytes", data.len());
+                    //println!("CLIENT: sent {} bytes", data.len());
                 }
             }
         });
 
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
         let cfg = VideoConfig::default();
-        println!(
-            "connection status: connected={}\nhas_peer={}",
-            *self.conn_flag_rx.borrow(),
-            *self.peer_flag_rx.borrow()
-        );
+        // println!(
+        //     "connection status: connected={}\nhas_peer={}",
+        //     *self.conn_flag_rx.borrow(),
+        //     *self.peer_flag_rx.borrow()
+        // );
         if let Some(pattern) = &self.test_pattern {
             // TODO: this is jank, may not be important if we remove patterns in future
             let pattern_val = match pattern {
@@ -258,7 +262,7 @@ impl Client {
         loop {
             let mut byte = [0u8; 1];
             if rd.read(&mut byte).await? == 0 {
-                return Err("unexpected EOF waiting for OK".into())
+                return Err("unexpected EOF waiting for OK".into());
             }
             line.push(byte[0]);
             if byte[0] == b'\n' {
@@ -271,13 +275,5 @@ impl Client {
         } else {
             Err(format!("unexpected reply: {}", text).into())
         }
-        // let mut buf = [0u8; 1024];
-        // let n = rd.read(&mut buf).await?;
-        // let reply = std::str::from_utf8(&buf[..n])?;
-        // if reply.trim().starts_with("OK") {
-        //     Ok(())
-        // } else {
-        //     Err(format!("ERROR unexpected reply: {reply}").into())
-        // }
     }
 }

@@ -150,14 +150,14 @@ impl SessionManager {
     /// Creates a session if it doesn't already exist
     pub async fn ensure_session(&self, id: &str) {
         let mut inner = self.inner.write().await;
-        
+
         // essentially, insert if absent
         inner
             .sessions
             .entry(id.to_owned())
             .or_insert_with(|| Session::new(id.to_owned()));
     }
-    
+
     pub async fn add_client(
         &self,
         session_id: &str,
@@ -165,20 +165,22 @@ impl SessionManager {
         tx: mpsc::UnboundedSender<Message>,
     ) -> bool {
         let mut inner = self.inner.write().await;
-        
+
         if let Some(s) = inner.sessions.get_mut(session_id) {
             if s.add_client(tcp_addr, tx) {
-                inner.client_sessions.insert(tcp_addr, session_id.to_owned());
+                inner
+                    .client_sessions
+                    .insert(tcp_addr, session_id.to_owned());
                 return true;
             }
         }
-        
+
         false
     }
-    
+
     pub async fn register_udp(&self, tcp: SocketAddr, udp: SocketAddr) {
         let mut inner = self.inner.write().await;
-        
+
         if let Some(id) = inner.client_sessions.get(&tcp).cloned() {
             if let Some(s) = inner.sessions.get_mut(&id) {
                 s.register_udp(tcp, udp);
@@ -186,18 +188,18 @@ impl SessionManager {
             }
         }
     }
-    
+
     pub async fn get_peer_udp(&self, udp_src: &SocketAddr) -> Option<SocketAddr> {
         let inner = self.inner.read().await;
         let tcp = inner.udp_to_tcp.get(&udp_src)?;
         let id = inner.client_sessions.get(tcp)?;
-        
+
         inner.sessions.get(id)?.get_peer_udp(tcp)
     }
-    
+
     pub async fn notify_peer(&self, tcp: &SocketAddr, msg: Message) {
         // let inner = self.inner.read().await;
-        // 
+        //
         // if let Some(id) = inner.client_sessions.get(tcp) {
         //     if let Some(s) = inner.sessions.get(id) {
         //         if let Some(peer_tx) = s.get_peer_tx(tcp) {
@@ -216,10 +218,10 @@ impl SessionManager {
         };
 
         if let Some(tx) = peer_tx {
-            let _ = tx.send(msg);          // no lock held here
+            let _ = tx.send(msg); // no lock held here
         }
     }
-    
+
     pub async fn remove_client(&self, tcp: &SocketAddr) {
         let mut inner = self.inner.write().await;
         if let Some(id) = inner.client_sessions.remove(tcp) {
@@ -231,23 +233,25 @@ impl SessionManager {
             }
         }
     }
-    
+
     /// Return peer's UDP address given your own TCP address
     /// (both clients are present & peer already registered there UDP port)
     pub async fn get_peer_udp_from_tcp(&self, tcp: &SocketAddr) -> Option<SocketAddr> {
         let inner = self.inner.read().await;
         let id = inner.client_sessions.get(tcp)?;
-        let room =  inner.sessions.get(id)?;
+        let room = inner.sessions.get(id)?;
         room.get_peer_udp(tcp)
     }
-    
+
     pub async fn session_full(&self, id: &str) -> bool {
         let inner = self.inner.read().await;
-        inner.sessions.get(id)
+        inner
+            .sessions
+            .get(id)
             .map(|s| !s.has_open_slot())
             .unwrap_or(false)
     }
-    
+
     pub async fn session_id_for(&self, tcp: &SocketAddr) -> Option<String> {
         let inner = self.inner.read().await;
         inner.client_sessions.get(tcp).cloned()

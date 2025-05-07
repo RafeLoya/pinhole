@@ -1,11 +1,10 @@
 use std::error::Error;
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::task;
+use tokio::{select, task};
 
 use crate::sessions::{Message, SessionManager};
 use common::logger::Logger;
@@ -60,113 +59,100 @@ impl SFU {
         let udp_sessions = self.sessions.clone();
         task::spawn(Self::udp_loop(udp, udp_sessions));
 
-        // control messages
-        let tcp_listener = TcpListener::bind(&self.tcp_addr)?;
+        let tcp_listener = tokio::net::TcpListener::bind(&self.tcp_addr).await?;
         logger.info(&format!(
             "TCP control channel listening on: {}",
             self.tcp_addr
         ))?;
 
+        // === TCP CONTROL TASK ===================================================================
         loop {
-            let (mut socket, addr) = match tcp_listener.accept() {
-                Ok((s, a)) => (s, a),
-                Err(e) => {
-                    eprintln!("TCP accept error: {}", e);
-                    continue;
-                }
-            };
+            let (socket, addr) = tcp_listener.accept().await?;
+            logger.info(&format!("new TCP control connection from: {}", addr))?;
 
-            let mut sessions = self.sessions.clone();
+            let sessions = self.sessions.clone();
             task::spawn(async move {
-                let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
-                
-                let mut writer = socket.try_clone().unwrap();
-                task::spawn(async move {
-                    while let Some(msg) = rx.recv().await {
-                        let _ = match msg {
-                            Message::Connect(_) => writer.write_all(b"CONNECTED\n"),
-                            Message::Disconnect => writer.write_all(b"DISCONNECTED\n"),
-                            Message::AsciiFrame(..) => Ok(()) // frames are NEVER sent on TCP! 
-                        };
-                    }
-                });
-                
-                // TODO: does semicolon get in the way of control parsing?
-                let mut buf = [0u8; 1024];
-                loop {
-                    let n = match socket.read(&mut buf) {
-                        Ok(0) => break,    // closed connection
-                        Ok(n) => n,
-                        Err(_) => break,
+                if let Err(e) = Self::handle_client(socket, addr, sessions).await {
+                    eprintln!("connection {} error: {}", addr, e);
+                }
+            });
+        }
+    }
+
+    async fn handle_client(
+        socket: TcpStream,
+        addr: SocketAddr,
+        sessions: Arc<SessionManager>,
+    ) -> Result<(), Box<dyn Error>> {
+        let (mut rd, mut wr) = socket.into_split();
+
+        let (peer_tx, mut peer_rx) = mpsc::unbounded_channel::<Message>();
+
+        let mut cmd_buf = vec![0u8; 1024];
+        loop {
+            select! {
+                // session notifications
+                Some(msg) = peer_rx.recv() => {
+                    let line: &str = match msg {
+                        Message::Connect(_) => "CONNECTED\n",
+                        Message::Disconnect => "DISCONNECTED\n",
+                        _ => continue
                     };
-                    let line = std::str::from_utf8(&buf[..n]).unwrap();
-                    let mut parts = line.trim().split_whitespace();
+                    wr.write_all(line.as_bytes()).await?;
+                }
+                result = rd.read(&mut cmd_buf) => {
+                    let n = result?;
+                    if n == 0 {
+                        // client has closed connection
+                        break;
+                    }
+                    let line = std::str::from_utf8(&cmd_buf[..n])?.trim();
+                    let mut parts = line.split_whitespace();
                     match parts.next() {
                         Some("JOIN") => {
                             if let Some(id) = parts.next() {
                                 sessions.ensure_session(id).await;
-                                if sessions.add_client(id, addr, tx.clone()).await {
-                                    let _ = socket.write_all(b"OK: joined session\n");
-                                    sessions.notify_peer(&addr, Message::Connect(id.to_owned())).await;
-                                    
-                                    // if sessions.session_full(id).await {
-                                    //     let _ = tx.send(Message::Connect(id.to_owned()));
-                                    // }
-                                    
-                                    // if let Some(peer_udp) = sessions.get_peer_udp_from_tcp(&addr).await {
-                                    //     let _ = tx.send(Message::Connect(id.to_owned()));
-                                    // }
-                                    // if sessions.session_full(id).await {
-                                    //     let _ = tx.send(Message::Connect(id.to_owned()));
-                                    // }
+                                if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
+                                    wr.write_all(b"OK: joined session\n").await?;
                                 } else {
-                                    let _ = socket.write_all(b"ERROR: session full\n");
+                                    wr.write_all(b"ERROR: session full\n").await?;
                                 }
                             }
                         }
                         Some("LEAVE") => {
                             sessions.notify_peer(&addr, Message::Disconnect).await;
                             sessions.remove_client(&addr).await;
-                            let _ = socket.write_all(b"OK: left session\n");
+                            wr.write_all(b"OK: left session\n").await?;
                         }
                         Some("REGISTER_UDP") => {
-                            if let Some(p) = parts.next().and_then(|p| p.parse::<u16>().ok()) {
+                            if let Some(p) = parts.next().and_then(|s| s.parse::<u16>().ok()) {
                                 let udp = SocketAddr::new(addr.ip(), p);
-                                println!("TCP->REGISTER_UDP from {addr}: {udp}");
                                 sessions.register_udp(addr, udp).await;
-                                println!(">> mapped UDP {udp} -> TCP {addr}");
-                                let _ = socket.write_all(b"OK: registered UDP\n");
-                                
-                                if let Some(id) = sessions.session_id_for(&addr).await {
-                                    if sessions.session_full(&id).await {
-                                        let _ = tx.send(Message::Connect(id.to_owned()));
-                                    }
+                                wr.write_all(b"OK: registered UDP\n").await?;
+
+                                let id = sessions.session_id_for(&addr).await.unwrap();
+                                if sessions.session_full(&id).await {
+                                    sessions.notify_peer(&addr, Message::Connect(id.clone())).await;
+                                    peer_tx.send(Message::Connect(id)).ok();
                                 }
-                                // println!("TCP→REGISTER_UDP from {addr}: {udp}");
-                                // sessions.register_udp(addr, udp).await;
-                                // println!(">> mapped UDP {udp} -> TCP {addr}");
-                                // let _ = socket.write_all(b"OK: registered UDP\n");
                             }
                         }
                         _ => {
-                            let _ = socket.write_all(b"ERROR\n");
+                            wr.write_all(b"ERROR: unknown command\n").await?;
                         }
                     }
                 }
-                
-                sessions.notify_peer(&addr, Message::Disconnect).await;
-                sessions.remove_client(&addr).await;
-                println!("closed control for {}", addr);
-            });
+            }
         }
+
+        sessions.notify_peer(&addr, Message::Disconnect).await;
+        sessions.remove_client(&addr).await;
+        Ok(())
     }
 
-    pub async fn udp_loop(
-        socket: UdpSocket,
-        sessions: Arc<SessionManager>,
-    ) {
+    pub async fn udp_loop(socket: UdpSocket, sessions: Arc<SessionManager>) {
         let mut buf = vec![0u8; 65536];
-        
+
         loop {
             let (n, src) = match socket.recv_from(&mut buf).await {
                 Ok(v) => v,
@@ -175,11 +161,11 @@ impl SFU {
                     continue;
                 }
             };
-            println!("<< got {} bytes from UDP sr{}", n, src);
+            //println!("<< got {} bytes from UDP sr{}", n, src);
             if let Some(dst) = sessions.get_peer_udp(&src).await {
                 match socket.send_to(&buf[..n], dst).await {
                     Ok(sent) => {
-                        println!("forwarded {} bytes from {} -> {}", sent, src, dst);
+                        //println!("forwarded {} bytes from {} -> {}", sent, src, dst);
                     }
                     Err(e) => {
                         eprintln!("udp send error to {dst}: {e}");

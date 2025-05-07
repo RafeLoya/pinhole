@@ -82,7 +82,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
-    let client = Client::new(args.tcp_addr, args.udp_addr, session_id.clone(), pattern_type);
+    let client = Client::new(
+        args.tcp_addr,
+        args.udp_addr,
+        session_id.clone(),
+        pattern_type,
+    );
 
     client.run().await?;
 
