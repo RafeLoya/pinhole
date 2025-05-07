@@ -24,6 +24,7 @@ enum TestPattern {
     MovingLine,
 }
 
+// TODO: this is really jank, probably not important tho if we will remove test patterns in future
 impl From<TestPattern> for PatternType {
     fn from(pattern: TestPattern) -> Self {
         match pattern {
@@ -58,7 +59,6 @@ struct Args {
     #[arg(short = 's', long, default_value = "")]
     session_id: String,
 
-    // TODO:
     #[arg(short = 'p', long)]
     test_pattern: Option<TestPattern>,
 }
@@ -78,11 +78,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("connection to session: {}", session_id);
 
     let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
-    if let Some(pattern) = &pattern_type {
+    if let Some(_) = &pattern_type {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
-    let client = Client::new(args.tcp_addr, args.udp_addr, args.session_id, pattern_type);
+    let client = Client::new(args.tcp_addr, args.udp_addr, session_id.clone(), pattern_type);
 
     client.run().await?;
 

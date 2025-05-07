@@ -15,6 +15,9 @@ use tokio::sync::{mpsc, watch};
 use tokio::task;
 use tokio::time::sleep;
 
+/// Max amount of frames that can be buffered
+const FRAME_BUFFER: usize = 90;
+
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
 /// Can either use a camera or generate a test patten
@@ -83,12 +86,20 @@ impl Client {
         );
 
         // session handshake (JOIN + REGISTER_UDP)
-        tcp_wr.write_all(format!("JOIN {}", self.session_id).as_bytes()).await?;
+        tcp_wr
+            .write_all(format!("JOIN {}\n", self.session_id).as_bytes())
+            .await?;
         Self::expect_ok(&mut tcp_rd).await?;
         println!("JOIN received by server for session {}", self.session_id);
-        tcp_wr.write_all(format!("REGISTER_UDP {}\n", local_udp_addr.port()).as_bytes()).await?;
+        tcp_wr
+            .write_all(format!("REGISTER_UDP {}\n", local_udp_addr.port()).as_bytes())
+            .await?;
         Self::expect_ok(&mut tcp_rd).await?;
-        println!("Registered UDP port {} with server for session {}", local_udp_addr.port(), self.session_id);
+        println!(
+            "Registered UDP port {} with server for session {}",
+            local_udp_addr.port(),
+            self.session_id
+        );
 
         // update our session status to connected
         let _ = self.conn_flag_tx.send(true);
@@ -96,7 +107,11 @@ impl Client {
         println!("joined session: {}", self.session_id);
 
         // TODO: how large should buffer be?
-        let (frame_tx, mut frame_rx) = mpsc::channel::<AsciiFrame>(32);
+        // EXPERIMENTAL: target FPS * worst consumer lag in seconds
+        // 30 FPS * 3 Seconds = 90
+        // TODO: watch channel? only keeping one frame but latency bounded at one frame
+        // TODO: broadcast channel (ring buffer)? drops oldest frame automatically
+        let (frame_tx, mut frame_rx) = mpsc::channel::<AsciiFrame>(FRAME_BUFFER);
 
         // === TCP SESSION CONTROL ================================================================
         // Reads control messages from server, updating local state about
@@ -122,6 +137,7 @@ impl Client {
 
                 match &buf[..n] {
                     msg if msg.starts_with(b"CONNECTED") => {
+                        println!("CONTROL: got CONNECTED");
                         let _ = ctrl_peer_tx.send(true);
                     }
                     msg if msg.starts_with(b"DISCONNECTED") => {
@@ -167,11 +183,12 @@ impl Client {
             while *send_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = send_peer_rx.wait_for(|peer| *peer).await;
-                
-                // TODO: is this assuming AsciiFrame can be deserialized as bytes?
+
+                // TODO: look at notes "Current Caveats of AsciiFrame"
                 if let Some(frame) = frame_rx.recv().await {
                     let data = AsciiRenderer::serialize_frame(&frame);
                     let _ = udp_send.send(&data).await;
+                    println!("CLIENT: sent {} bytes", data.len());
                 }
             }
         });
@@ -222,8 +239,8 @@ impl Client {
             while *self.conn_flag_rx.borrow() {
                 if *self.peer_flag_rx.borrow() {
                     camera.capture_frame(&mut image_frame)?;
-                    converter.convert(&image_frame,  &mut ascii_frame)?;
-                    
+                    converter.convert(&image_frame, &mut ascii_frame)?;
+
                     let mut output = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
                     output.set_chars_from_bytes(&ascii_frame.bytes());
                     let _ = frame_tx.try_send(output);
@@ -231,19 +248,36 @@ impl Client {
                 sleep(Duration::from_millis(33)).await;
             }
         }
-        
+
         let _ = tcp_wr.write_all(b"LEAVE\n").await;
         Ok(())
     }
 
     async fn expect_ok(rd: &mut OwnedReadHalf) -> Result<(), Box<dyn Error>> {
-        let mut buf = [0u8; 1024];
-        let n = rd.read(&mut buf).await?;
-        let reply = std::str::from_utf8(&buf[..n])?;
-        if reply.trim().starts_with("OK") {
+        let mut line = Vec::with_capacity(64);
+        loop {
+            let mut byte = [0u8; 1];
+            if rd.read(&mut byte).await? == 0 {
+                return Err("unexpected EOF waiting for OK".into())
+            }
+            line.push(byte[0]);
+            if byte[0] == b'\n' {
+                break;
+            }
+        }
+        let text = std::str::from_utf8(&line)?.trim_start();
+        if text.starts_with("OK") {
             Ok(())
         } else {
-            Err(format!("ERROR unexpected reply: {reply}").into())
+            Err(format!("unexpected reply: {}", text).into())
         }
+        // let mut buf = [0u8; 1024];
+        // let n = rd.read(&mut buf).await?;
+        // let reply = std::str::from_utf8(&buf[..n])?;
+        // if reply.trim().starts_with("OK") {
+        //     Ok(())
+        // } else {
+        //     Err(format!("ERROR unexpected reply: {reply}").into())
+        // }
     }
 }
