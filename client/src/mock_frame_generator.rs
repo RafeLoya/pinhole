@@ -42,7 +42,7 @@ impl MockFrameGenerator {
     pub fn generate_frame(&mut self) -> Result<AsciiFrame, Box<dyn Error>> {
         let elapsed = self.last_frame_time.elapsed();
         if elapsed < self.frame_delay {
-            std::thread::sleep(self.frame_delay - elapsed);
+            //std::thread::sleep(self.frame_delay - elapsed);
         }
         self.last_frame_time = Instant::now();
 

@@ -11,12 +11,13 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::sleep;
+use tokio::time::{interval, sleep, Instant, MissedTickBehavior};
 
 /// Max amount of frames that can be buffered
-const FRAME_BUFFER: usize = 90;
+const FRAME_BUFFER: usize = 15;
+const FPS: u64 = 30;
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
@@ -115,7 +116,7 @@ impl Client {
         // 30 FPS * 3 Seconds = 90
         // TODO: watch channel? only keeping one frame but latency bounded at one frame
         // TODO: broadcast channel (ring buffer)? drops oldest frame automatically
-        let (frame_tx, mut frame_rx) = mpsc::channel::<AsciiFrame>(FRAME_BUFFER);
+        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
 
         // === TCP SESSION CONTROL ================================================================
         // Reads control messages from server, updating local state about
@@ -156,14 +157,19 @@ impl Client {
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
+        let frame_interval = Duration::from_millis((1000 / FPS));
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
+            // let mut ticker = interval(frame_interval);
+            // ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let mut next_frame = Instant::now() + frame_interval;
 
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
 
+                // ticker.tick().await;
                 match udp_rend.recv(&mut buf).await {
                     Ok(n) => {
                         if let Ok(frame) = renderer.process_datagram(&buf[..n]) {
@@ -172,9 +178,16 @@ impl Client {
                     }
                     Err(e) => {
                         eprintln!("UDP receive error: {e}");
-                        continue;
+                        //continue;
                     }
                 }
+                
+                let now =  Instant::now();
+                if next_frame > now {
+                    sleep(next_frame - now).await;
+                }
+                eprintln!("time to sleep {:?}", next_frame - now);
+                next_frame = Instant::now() + frame_interval;
             }
         });
 
@@ -183,17 +196,29 @@ impl Client {
         let send_conn_rx = self.conn_flag_rx.clone();
         let mut send_peer_rx = self.peer_flag_rx.clone();
         let udp_send = udp_socket.clone();
+        let mut ser_rx = frame_tx.subscribe();
         task::spawn(async move {
             while *send_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = send_peer_rx.wait_for(|peer| *peer).await;
 
-                // TODO: look at notes "Current Caveats of AsciiFrame"
-                if let Some(frame) = frame_rx.recv().await {
-                    let data = AsciiRenderer::serialize_frame(&frame);
-                    let _ = udp_send.send(&data).await;
-                    //println!("CLIENT: sent {} bytes", data.len());
+                match ser_rx.recv().await {
+                    Ok(frame) => {
+                        let data = AsciiRenderer::serialize_frame(&frame);
+                        let _ = udp_send.send(&data).await;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                    _ => {}
                 }
+                
+                // // TODO: look at notes "Current Caveats of AsciiFrame"
+                // if let Some(frame) = frame_rx.recv().await {
+                //     let data = AsciiRenderer::serialize_frame(&frame);
+                //     let _ = udp_send.try_send(&data);
+                //     //println!("CLIENT: sent {} bytes", data.len());
+                // }
             }
         });
 
@@ -217,9 +242,9 @@ impl Client {
             while *self.conn_flag_rx.borrow() {
                 if *self.peer_flag_rx.borrow() {
                     let frame = frame_gen.generate_frame()?;
-                    let _ = frame_tx.try_send(frame);
+                    let _ = frame_tx.send(frame);
                 }
-                sleep(Duration::from_millis(33)).await;
+                //sleep(Duration::from_millis(33)).await;
             }
         } else {
             let mut camera = Camera::new(cfg.camera_width, cfg.camera_height)?;
@@ -247,9 +272,9 @@ impl Client {
 
                     let mut output = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
                     output.set_chars_from_bytes(&ascii_frame.bytes());
-                    let _ = frame_tx.try_send(output);
+                    let _ = frame_tx.send(output);
                 }
-                sleep(Duration::from_millis(33)).await;
+                //sleep(Duration::from_millis(33)).await;
             }
         }
 

@@ -106,7 +106,7 @@ impl EdgeDetector {
                         info.angle = angle;
                     }
                 } else {
-                    thread::sleep(Duration::from_millis(5));
+                    //thread::sleep(Duration::from_millis(5));
                 }
             }
         });
