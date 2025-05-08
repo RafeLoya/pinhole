@@ -5,6 +5,7 @@ const DEFAULT_H: usize = 40;
 
 /// ASCII representation of an `ImageFrame` after contrast, brightness,
 /// and luminance transformations
+#[derive(Clone)]
 pub struct AsciiFrame {
     /// The amount of columns in the frame
     pub w: usize,
