@@ -1,30 +1,26 @@
-name: Build and Deploy Server
-
+name: Build and Deploy Server (Dev)
 on:
+  # Run on any push to any branch (for now)
   push:
-    branches:
-      - release-dev
 
 jobs:
   build-and-deploy:
     name: Build & Deploy to ${{ matrix.runner }}
+    # Only trigger runner when pushing to a repository that actually has a runner
+    if: github.repository == 'ickoxii/final-project-group04_s25'
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         runner: [dev]  # Can add more if we want multiple runners
-
     steps:
       - uses: actions/checkout@v3
-
       - name: Build ${{ matrix.runner }}
         run: |
           docker compose -f .devcontainer/ci.docker-compose.yml build server
-
       - name: Deploy to ${{ matrix.runner }}
         run: |
           docker compose -f .devcontainer/ci.docker-compose.yml down server -v
           docker compose -f .devcontainer/ci.docker-compose.yml up server -d
-
       - name: Clean
         run: |
           docker image prune -af
