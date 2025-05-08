@@ -13,7 +13,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{interval, sleep, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep};
 
 /// Max amount of frames that can be buffered
 const FRAME_BUFFER: usize = 15;
@@ -75,14 +75,14 @@ impl Client {
         // establish TCP socket
         let tcp_stream = TcpStream::connect(&self.server_tcp_addr).await?;
         let (mut tcp_rd, mut tcp_wr) = tcp_stream.into_split();
-        
+
         //println!("Connected to server at {}", &self.server_tcp_addr);
 
         // establish UDP socket
         let udp_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
         let local_udp_addr = udp_socket.local_addr()?;
         udp_socket.connect(&self.server_udp_addr).await?;
-        
+
         // println!(
         //     "UDP socket bound to {} and connected to {}",
         //     local_udp_addr, self.server_udp_addr
@@ -181,8 +181,8 @@ impl Client {
                         //continue;
                     }
                 }
-                
-                let now =  Instant::now();
+
+                let now = Instant::now();
                 if next_frame > now {
                     sleep(next_frame - now).await;
                 }
@@ -212,7 +212,7 @@ impl Client {
                     }
                     _ => {}
                 }
-                
+
                 // // TODO: look at notes "Current Caveats of AsciiFrame"
                 // if let Some(frame) = frame_rx.recv().await {
                 //     let data = AsciiRenderer::serialize_frame(&frame);

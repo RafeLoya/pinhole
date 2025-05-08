@@ -128,23 +128,23 @@ impl SFU {
                             println!("Sending to {}: OK: left session", addr);
                             wr.write_all(b"OK: left session\n").await?;
                         }
-                        Some("REGISTER_UDP") => {
-                            if let Some(p) = parts.next().and_then(|s| s.parse::<u16>().ok()) {
-                                let udp = SocketAddr::new(addr.ip(), p);
-                                sessions.register_udp(addr, udp).await;
-                                println!("Sending to {}: OK: registered UDP", addr);
-                                wr.write_all(b"OK: registered UDP\n").await?;
-
-                                let id = sessions.session_id_for(&addr).await.unwrap();
-                                if sessions.session_full(&id).await {
-                                    sessions.notify_peer(&addr, Message::Connect(id.clone())).await;
-                                    peer_tx.send(Message::Connect(id)).ok();
-                                }
-                            }
-                        }
+                        // Some("REGISTER_UDP") => {
+                        //     if let Some(p) = parts.next().and_then(|s| s.parse::<u16>().ok()) {
+                        //         let udp = SocketAddr::new(addr.ip(), p);
+                        //         sessions.register_udp(addr, udp).await;
+                        //         println!("Sending to {}: OK: registered UDP", addr);
+                        //         wr.write_all(b"OK: registered UDP\n").await?;
+                        //
+                        //         let id = sessions.session_id_for(&addr).await.unwrap();
+                        //         if sessions.session_full(&id).await {
+                        //             sessions.notify_peer(&addr, Message::Connect(id.clone())).await;
+                        //             peer_tx.send(Message::Connect(id)).ok();
+                        //         }
+                        //     }
+                        // }
                         _ => {
-                            println!("Sending to {}: ERROR: unknown command", addr);
-                            wr.write_all(b"ERROR: unknown command\n").await?;
+                            // println!("Sending to {}: ERROR: unknown command", addr);
+                            // wr.write_all(b"ERROR: unknown command\n").await?;
                         }
                     }
                 }
@@ -160,25 +160,28 @@ impl SFU {
         let mut buf = vec![0u8; 65536];
 
         loop {
-            let (n, src) = match socket.recv_from(&mut buf).await {
+            let (n, src_udp) = match socket.recv_from(&mut buf).await {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!("udp recv error: {e}");
                     continue;
                 }
             };
-            println!("<< got {} bytes from UDP sr{}", n, src);
-            if let Some(dst) = sessions.get_peer_udp(&src).await {
-                match socket.send_to(&buf[..n], dst).await {
+            println!("<< got {} bytes from UDP sr{}", n, src_udp);
+
+            sessions.map_udp_to_tcp(src_udp).await;
+
+            if let Some(dst_udp) = sessions.get_peer_udp(&src_udp).await {
+                match socket.send_to(&buf[..n], dst_udp).await {
                     Ok(sent) => {
-                        println!("forwarded {} bytes from {} -> {}", sent, src, dst);
+                        println!("forwarded {} bytes from {} -> {}", sent, src_udp, dst_udp);
                     }
                     Err(e) => {
-                        eprintln!("udp send error to {dst}: {e}");
+                        eprintln!("udp send error to {dst_udp}: {e}");
                     }
                 }
             } else {
-                eprintln!("no peer for UDP {src}");
+                eprintln!("no peer for UDP {src_udp}");
             }
         }
     }

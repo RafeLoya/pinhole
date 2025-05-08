@@ -42,7 +42,7 @@ impl AsciiRenderer {
     pub fn render(&mut self, frame: &AsciiFrame) -> Result<(), Box<dyn Error>> {
         // did frame size change?
         let start = Instant::now();
-        
+
         if frame.w != self.prev_w
             || frame.h != self.prev_h
             || self.prev_frame.len() != frame.w * frame.h
@@ -50,16 +50,16 @@ impl AsciiRenderer {
             self.prev_frame = vec![' '; frame.w * frame.h];
             self.prev_w = frame.w;
             self.prev_h = frame.h;
-        
+
             Self::clear_screen()?;
         }
-        
+
         //print!("\x1B[1;1H{:?}", frame.chars().to_vec());
 
         for y in 0..frame.h {
             for x in 0..frame.w {
                 let i = y * frame.w + x;
-        
+
                 if i < frame.chars().len()
                     && i < self.prev_frame.len()
                     && frame.chars()[i] != self.prev_frame[i]
@@ -73,8 +73,8 @@ impl AsciiRenderer {
         }
 
         io::stdout().flush()?;
-        
-        let end =  Instant::now();
+
+        let end = Instant::now();
         eprintln!("time to render: {:?}", end - start);
 
         Ok(())
