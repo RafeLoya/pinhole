@@ -104,7 +104,7 @@ tshark-prod: ## [GCP] View wireshark logs from production VM
 tshark-prod: ## [GCP]   Note: run inside the VM but not inside the container.
 tshark-prod: ## [GCP]   there is a tshark-command.sh script in the home directory with this command.
 	sudo tshark -i any -Y 'ip.addr == 127.0.0.1'
-.PHONY:
+.PHONY: tshark-prod
 
 test-dev:
 	CONTAINER_NAME=${CONTAINER_DEV} bash -c scripts/test-suite.sh

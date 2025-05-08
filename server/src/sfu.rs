@@ -98,6 +98,7 @@ impl SFU {
                         Message::Disconnect => "DISCONNECTED\n",
                         _ => continue
                     };
+                    println!("Sending to {}: {}", addr, line.trim());
                     wr.write_all(line.as_bytes()).await?;
                 }
                 result = rd.read(&mut cmd_buf) => {
@@ -113,8 +114,10 @@ impl SFU {
                             if let Some(id) = parts.next() {
                                 sessions.ensure_session(id).await;
                                 if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
+                                    println!("Sending to {}: OK: joined session", addr);
                                     wr.write_all(b"OK: joined session\n").await?;
                                 } else {
+                                    println!("Sending to {}: ERROR: session full", addr);
                                     wr.write_all(b"ERROR: session full\n").await?;
                                 }
                             }
@@ -122,12 +125,14 @@ impl SFU {
                         Some("LEAVE") => {
                             sessions.notify_peer(&addr, Message::Disconnect).await;
                             sessions.remove_client(&addr).await;
+                            println!("Sending to {}: OK: left session", addr);
                             wr.write_all(b"OK: left session\n").await?;
                         }
                         Some("REGISTER_UDP") => {
                             if let Some(p) = parts.next().and_then(|s| s.parse::<u16>().ok()) {
                                 let udp = SocketAddr::new(addr.ip(), p);
                                 sessions.register_udp(addr, udp).await;
+                                println!("Sending to {}: OK: registered UDP", addr);
                                 wr.write_all(b"OK: registered UDP\n").await?;
 
                                 let id = sessions.session_id_for(&addr).await.unwrap();
@@ -138,6 +143,7 @@ impl SFU {
                             }
                         }
                         _ => {
+                            println!("Sending to {}: ERROR: unknown command", addr);
                             wr.write_all(b"ERROR: unknown command\n").await?;
                         }
                     }
@@ -161,11 +167,11 @@ impl SFU {
                     continue;
                 }
             };
-            //println!("<< got {} bytes from UDP sr{}", n, src);
+            println!("<< got {} bytes from UDP sr{}", n, src);
             if let Some(dst) = sessions.get_peer_udp(&src).await {
                 match socket.send_to(&buf[..n], dst).await {
                     Ok(sent) => {
-                        //println!("forwarded {} bytes from {} -> {}", sent, src, dst);
+                        println!("forwarded {} bytes from {} -> {}", sent, src, dst);
                     }
                     Err(e) => {
                         eprintln!("udp send error to {dst}: {e}");

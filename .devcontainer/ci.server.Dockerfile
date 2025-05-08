@@ -4,7 +4,7 @@ FROM docker.io/acfreeman/rustnetworking
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
-    lsof iputils-ping tshark \
+    lsof iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && rustup default nightly
 
