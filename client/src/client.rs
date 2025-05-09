@@ -244,7 +244,7 @@ impl Client {
                     converter.convert(&image_frame, &mut ascii_frame)?;
 
                     let mut output = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
-                    output.set_chars_from_bytes(&ascii_frame.bytes());
+                    output.set_chars(ascii_frame.chars());
                     let _ = frame_tx.send(output);
                 }
             }
