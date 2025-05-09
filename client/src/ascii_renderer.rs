@@ -75,7 +75,7 @@ impl AsciiRenderer {
         io::stdout().flush()?;
 
         let end = Instant::now();
-        eprintln!("time to render: {:?}", end - start);
+        // eprintln!("time to render: {:?}", end - start);
 
         Ok(())
     }
