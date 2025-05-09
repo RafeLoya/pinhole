@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::str::from_utf8;
 
 const DEFAULT_W: usize = 120;
 const DEFAULT_H: usize = 40;
@@ -29,33 +30,60 @@ impl AsciiFrame {
     }
 
     pub fn from_bytes(w: usize, h: usize, bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        // if w == 0 || h == 0 {
+        //     return Err("dimensions must be greater than zero".into());
+        // }
+        // 
+        // if bytes.len() < w * h {
+        //     return Err(format!(
+        //         "not enough data: expected {} chars but got {}",
+        //         w * h,
+        //         bytes.len()
+        //     )
+        //     .into());
+        // }
+        // 
+        // let mut frame = Self {
+        //     w,
+        //     h,
+        //     chars: vec![' '; w * h],
+        // };
+        // 
+        // // TODO: is this faster? iterating vs. iter than memcpy?
+        // // for i in 0..w * h {
+        // //     frame.chars[i] = bytes[i] as char;
+        // // }
+        // let ascii: Vec<char> = bytes.iter().map(|&b| b as char).collect();
+        // frame.chars.copy_from_slice(&ascii);
+        // 
+        // Ok(frame)
+        
         if w == 0 || h == 0 {
             return Err("dimensions must be greater than zero".into());
         }
-
-        if bytes.len() < w * h {
-            return Err(format!(
-                "not enough data: expected {} chars but got {}",
-                w * h,
-                bytes.len()
-            )
-            .into());
+        
+        // validate UTF-8
+        let text = from_utf8(bytes)?;
+        let total = w * h;
+        let mut chars_itr = text.chars();
+        let mut grid = Vec::with_capacity(total);
+        
+        // pull EXACTLY w * h code-points, else truncation
+        for _ in 0..total {
+            grid.push(chars_itr.next().ok_or("frame truncation")?);
         }
-
-        let mut frame = Self {
+        
+        // any bytes after expected image? reject
+        // -> sender / receiver size mismatch
+        if chars_itr.next().is_some() {
+            return Err("Extra data after frame".into());
+        }
+        
+        Ok(Self {
             w,
             h,
-            chars: vec![' '; w * h],
-        };
-
-        // TODO: is this faster? iterating vs. iter than memcpy?
-        // for i in 0..w * h {
-        //     frame.chars[i] = bytes[i] as char;
-        // }
-        let ascii: Vec<char> = bytes.iter().map(|&b| b as char).collect();
-        frame.chars.copy_from_slice(&ascii);
-
-        Ok(frame)
+            chars: grid,
+        })
     }
 
     pub fn set_char(&mut self, x: usize, y: usize, c: char) -> bool {
@@ -109,13 +137,25 @@ impl AsciiFrame {
         &mut self.chars
     }
 
+    /// encode a frame into variable-width UTF-8 
     pub fn bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = Vec::with_capacity(self.chars.len());
-
+        // let mut bytes: Vec<u8> = Vec::with_capacity(self.chars.len());
+        // 
+        // for &c in &self.chars {
+        //     bytes.push(c as u8);
+        // }
+        // 
+        // bytes
+        
+        // worst case scenario - EVERY character uses all 4 code points
+        let mut out = Vec::with_capacity(self.chars().len() * 4);
+        
         for &c in &self.chars {
-            bytes.push(c as u8);
+            let mut buf = [0u8; 4];
+            let n = c.encode_utf8(&mut buf).len();
+            out.extend_from_slice(&buf[..n]);
         }
-
-        bytes
+        
+        out
     }
 }
