@@ -13,10 +13,10 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{Instant, MissedTickBehavior, interval, sleep};
+use tokio::time::{sleep, Instant};
 
 /// Max amount of frames that can be buffered
-const FRAME_BUFFER: usize = 15;
+const FRAME_BUFFER: usize = 30;
 const FPS: u64 = 30;
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
@@ -76,17 +76,10 @@ impl Client {
         let tcp_stream = TcpStream::connect(&self.server_tcp_addr).await?;
         let (mut tcp_rd, mut tcp_wr) = tcp_stream.into_split();
 
-        //println!("Connected to server at {}", &self.server_tcp_addr);
-
         // establish UDP socket
         let udp_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-        let local_udp_addr = udp_socket.local_addr()?;
+        // let local_udp_addr = udp_socket.local_addr()?;
         udp_socket.connect(&self.server_udp_addr).await?;
-
-        // println!(
-        //     "UDP socket bound to {} and connected to {}",
-        //     local_udp_addr, self.server_udp_addr
-        // );
 
         // === SESSION HANDSHAKE (JOIN + REGISTER_UDP) ============================================
         // Sends JOIN request to server to either create a new session or
@@ -95,16 +88,7 @@ impl Client {
             .write_all(format!("JOIN {}\n", self.session_id).as_bytes())
             .await?;
         Self::expect_ok(&mut tcp_rd).await?;
-        // println!("JOIN received by server for session {}", self.session_id);
-        tcp_wr
-            .write_all(format!("REGISTER_UDP {}\n", local_udp_addr.port()).as_bytes())
-            .await?;
-        Self::expect_ok(&mut tcp_rd).await?;
-        // println!(
-        //     "Registered UDP port {} with server for session {}",
-        //     local_udp_addr.port(),
-        //     self.session_id
-        // );
+        udp_socket.send(b"PING").await?;
 
         // update our session status to connected
         let _ = self.conn_flag_tx.send(true);
@@ -213,22 +197,12 @@ impl Client {
                     _ => {}
                 }
 
-                // // TODO: look at notes "Current Caveats of AsciiFrame"
-                // if let Some(frame) = frame_rx.recv().await {
-                //     let data = AsciiRenderer::serialize_frame(&frame);
-                //     let _ = udp_send.try_send(&data);
-                //     //println!("CLIENT: sent {} bytes", data.len());
-                // }
+                // TODO: look at notes "Current Caveats of AsciiFrame"
             }
         });
 
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
         let cfg = VideoConfig::default();
-        // println!(
-        //     "connection status: connected={}\nhas_peer={}",
-        //     *self.conn_flag_rx.borrow(),
-        //     *self.peer_flag_rx.borrow()
-        // );
         if let Some(pattern) = &self.test_pattern {
             // TODO: this is jank, may not be important if we remove patterns in future
             let pattern_val = match pattern {
@@ -244,7 +218,6 @@ impl Client {
                     let frame = frame_gen.generate_frame()?;
                     let _ = frame_tx.send(frame);
                 }
-                //sleep(Duration::from_millis(33)).await;
             }
         } else {
             let mut camera = Camera::new(cfg.camera_width, cfg.camera_height)?;
@@ -274,7 +247,6 @@ impl Client {
                     output.set_chars_from_bytes(&ascii_frame.bytes());
                     let _ = frame_tx.send(output);
                 }
-                //sleep(Duration::from_millis(33)).await;
             }
         }
 

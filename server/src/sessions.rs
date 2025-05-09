@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
-use tokio::sync::{RwLock, mpsc};
+use std::net::SocketAddr;
+use tokio::sync::{mpsc, RwLock};
 
 pub enum Message {
     AsciiFrame(Vec<u8>),
@@ -15,6 +15,7 @@ pub struct Session {
     pub client_b: Option<(SocketAddr, mpsc::UnboundedSender<Message>)>,
     pub udp_a: Option<SocketAddr>,
     pub udp_b: Option<SocketAddr>,
+    pub connected_notified: bool,
 }
 
 impl Session {
@@ -25,6 +26,7 @@ impl Session {
             client_b: None,
             udp_a: None,
             udp_b: None,
+            connected_notified: false,
         }
     }
 
@@ -128,6 +130,7 @@ pub struct SessionManager {
     inner: RwLock<Inner>,
 }
 
+/// Actual struct maintaining the data above.
 struct Inner {
     /// map of active sessions, where the key is a given session's ID
     pub sessions: HashMap<String, Session>,
@@ -198,16 +201,6 @@ impl SessionManager {
     }
 
     pub async fn notify_peer(&self, tcp: &SocketAddr, msg: Message) {
-        // let inner = self.inner.read().await;
-        //
-        // if let Some(id) = inner.client_sessions.get(tcp) {
-        //     if let Some(s) = inner.sessions.get(id) {
-        //         if let Some(peer_tx) = s.get_peer_tx(tcp) {
-        //             let _ = peer_tx.send(msg);
-        //         }
-        //     }
-        // }
-
         let peer_tx = {
             let inner = self.inner.read().await;
             inner
@@ -257,41 +250,69 @@ impl SessionManager {
         inner.client_sessions.get(tcp).cloned()
     }
 
+    /// I sincerely apologize for this abomination below.
     pub async fn map_udp_to_tcp(&self, udp_src: SocketAddr) {
-        let matching_tcp: Option<SocketAddr> = {
-            let inner = self.inner.read().await;
-            inner
-                .client_sessions
-                .keys()
-                .find(|tcp_addr| tcp_addr.ip() == udp_src.ip())
-                .copied()
-        };
+        let mut inner = self.inner.write().await;
 
-        if let Some(tcp_addr) = matching_tcp {
-            let mut inner = self.inner.write().await;
-            if inner.udp_to_tcp.contains_key(&udp_src) {
-                return;
-            }
+        // make sure we don't have to perform the terrible awful thing
+        // that rears its ugly head below...
+        if inner.udp_to_tcp.contains_key(&udp_src) {
+            return;
+        }
 
-            if let Some(session_id) = inner.client_sessions.get(&tcp_addr) {
-                let s_id = session_id.clone();
-                if let Some(session) = inner.sessions.get_mut(&s_id) {
-                    session.register_udp(tcp_addr, udp_src);
-                    inner.udp_to_tcp.insert(udp_src, tcp_addr);
-                    println!("registered real UDP src {} to TCP {}", udp_src, tcp_addr);
-                }
-            }
+        // Oh, God!
+        let candidate = inner
+            .client_sessions
+            .keys()
+            .filter(|tcp| tcp.ip() == udp_src.ip())
+            .find(|tcp| {
+                inner
+                    .sessions
+                    .get(inner.client_sessions.get(tcp).unwrap())
+                    .map(|session| {
+                        let unregistered_a = session
+                            .client_a
+                            .as_ref()
+                            .filter(|(a, _)| a == *tcp)
+                            .map(|_| session.udp_a.is_none())
+                            .unwrap_or(false);
+                        let unregistered_b = session
+                            .client_b
+                            .as_ref()
+                            .filter(|(b, _)| b == *tcp)
+                            .map(|_| session.udp_b.is_none())
+                            .unwrap_or(false);
+                        
+                        unregistered_a || unregistered_b
+                    })
+                    .unwrap_or(false)
+            })
+            .copied();
+        
+        if let Some(tcp_addr) = candidate {
+            let s_id = inner.client_sessions.get(&tcp_addr).unwrap().clone();
+            inner.sessions.get_mut(&s_id).unwrap().register_udp(tcp_addr, udp_src);
+            inner.udp_to_tcp.insert(udp_src, tcp_addr);
+            println!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
+        } else {
+            eprintln!("UDP {} could not be matched to any client", udp_src);
         }
     }
 
-    // pub async fn match_client_by_ip(&self, udp_ip: IpAddr) -> Option<SocketAddr> {
-    //     let inner = self.inner.read().await;
-    //     for (tcp_addr, _) in inner.client_sessions.iter() {
-    //         if tcp_addr.ip() == udp_ip {
-    //             return Some(*tcp_addr);
-    //         }
-    //     }
-    //
-    //     None
-    // }
+    pub async fn tcp_for_udp(&self, udp_src: &SocketAddr) -> Option<SocketAddr> {
+        let inner = self.inner.read().await;
+        inner.udp_to_tcp.get(udp_src).copied()
+    }
+    
+    pub async fn mark_connected(&self, id: &str) {
+        let mut inner = self.inner.write().await;
+        if let Some(s) = inner.sessions.get_mut(id) {
+            s.connected_notified = true;
+        }
+    }
+    
+    pub async fn is_connected(&self, id: &str) -> bool {
+        let inner = self.inner.read().await;
+        inner.sessions.get(id).map(|s| s.connected_notified).unwrap_or(false)
+    }
 }
