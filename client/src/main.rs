@@ -48,11 +48,11 @@ impl From<TestPattern> for PatternType {
 #[command(version, about, long_about = None)]
 struct Args {
     /// TCP server bind address
-    #[arg(short = 't', long, default_value = "127.0.0.1:8080")]
+    #[arg(short = 't', long, default_value = "35.226.114.166:8080")]
     tcp_addr: String,
 
     /// UDP server bind address
-    #[arg(short = 'u', long, default_value = "127.0.0.1:4433")]
+    #[arg(short = 'u', long, default_value = "35.226.114.166:4433")]
     udp_addr: String,
 
     /// Session ID to join (random if not given)
