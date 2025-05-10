@@ -11,18 +11,18 @@ use common::logger::Logger;
 
 // TODO: JSON structuring vs regular sentence!
 
-/// Server acting as a Selective Forwarding Unit for connected clients,
-/// responsible for session control (TCP) and frame forwarding (UDP)
+/// Server acting as a Selective Forwarding Unit for connected clients,  
+/// responsible for session control (TCP) and frame forwarding (UDP)  
 pub struct SFU {
-    /// Address for sending control messages to clients
+    /// Address for sending control messages to clients  
     tcp_addr: String,
-    /// Address for forwarding frame datagrams between peers
+    /// Address for forwarding frame datagrams between peers  
     udp_addr: String,
-    /// Record of server activity
+    /// Record of server activity  
     log_file: String,
-    /// Option to have a finer level of detail in the log file
+    /// Option to have a finer level of detail in the log file  
     verbose: bool,
-    /// Thread-safe session manager for client/session tracking
+    /// Thread-safe session manager for client/session tracking  
     sessions: Arc<SessionManager>,
 }
 
@@ -37,14 +37,13 @@ impl SFU {
         }
     }
 
-    /// Starts SFU, which does the following:
-    /// - Binds UDP and TCP sockets
-    /// - Spawns handler threads for both protocols
-    /// - Continuously accepts TCP connections for control
+    /// Starts SFU, which does the following:  
+    /// - Binds UDP and TCP sockets    
+    /// - Spawns handler threads for both protocols    
+    /// - Continuously accepts TCP connections for control    
     pub async fn run(&self) -> Result<(), Box<dyn Error>> {
         let logger = Logger::with_file_name(&self.log_file)?;
         logger.info("starting SFU server for ASCII video streaming")?;
-
         if self.verbose {
             println!("SFU server starting with configurations:");
             println!("\tTCP control address: {}", self.tcp_addr);
@@ -91,46 +90,46 @@ impl SFU {
         let mut cmd_buf = vec![0u8; 1024];
         loop {
             select! {
-                // session notifications
-                Some(msg) = peer_rx.recv() => {
-                    let line: &str = match msg {
-                        Message::Connect(_) => "CONNECTED\n",
-                        Message::Disconnect => "DISCONNECTED\n",
-                        _ => continue
-                    };
-                    println!("Sending to {}: {}", addr, line.trim());
-                    wr.write_all(line.as_bytes()).await?;
-                }
-                result = rd.read(&mut cmd_buf) => {
-                    let n = result?;
-                    if n == 0 {
-                        // client has closed connection
-                        break;
+                    // session notifications
+                    Some(msg) = peer_rx.recv() => {
+                        let line: &str = match msg {
+                            Message::Connect(_) => "CONNECTED\n",
+                            Message::Disconnect => "DISCONNECTED\n",
+                            _ => continue
+                        };
+                        println!("Sending to {}: {}", addr, line.trim());
+                        wr.write_all(line.as_bytes()).await?;
                     }
-                    let line = std::str::from_utf8(&cmd_buf[..n])?.trim();
-                    let mut parts = line.split_whitespace();
-                    match parts.next() {
-                        Some("JOIN") => {
-                            if let Some(id) = parts.next() {
-                                sessions.ensure_session(id).await;
-                                if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
-                                    println!("Sending to {}: OK: joined session", addr);
-                                    wr.write_all(b"OK: joined session\n").await?;
-                                } else {
-                                    println!("Sending to {}: ERROR: session full", addr);
-                                    wr.write_all(b"ERROR: session full\n").await?;
+                    result = rd.read(&mut cmd_buf) => {
+                        let n = result?;
+                        if n == 0 {
+                            // client has closed connection
+                            break;
+                        }
+                        let line = std::str::from_utf8(&cmd_buf[..n])?.trim();
+                        let mut parts = line.split_whitespace();
+                        match parts.next() {
+                            Some("JOIN") => {
+                                if let Some(id) = parts.next() {
+                                    sessions.ensure_session(id).await;
+                                    if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
+                                        println!("Sending to {}: OK: joined session", addr);
+                                        wr.write_all(b"OK: joined session\n").await?;
+                                    } else {
+                                        println!("Sending to {}: ERROR: session full", addr);
+                                        wr.write_all(b"ERROR: session full\n").await?;
+                                    }
                                 }
                             }
-                        }
-                        Some("LEAVE") => {
-                            sessions.notify_peer(&addr, Message::Disconnect).await;
-                            sessions.remove_client(&addr).await;
-                            println!("Sending to {}: OK: left session", addr);
-                            wr.write_all(b"OK: left session\n").await?;
-                        }
-                        _ => {
-                            // println!("Sending to {}: ERROR: unknown command", addr);
-                            // wr.write_all(b"ERROR: unknown command\n").await?;
+                            Some("LEAVE") => {
+                                sessions.notify_peer(&addr, Message::Disconnect).await;
+                                sessions.remove_client(&addr).await;
+                                println!("Sending to {}: OK: left session", addr);
+                                wr.write_all(b"OK: left session\n").await?;
+                            }
+                            _ => {
+                                // println!("Sending to {}: ERROR: unknown command", addr);
+                                // wr.write_all(b"ERROR: unknown command\n").await?;
                         }
                     }
                 }
@@ -153,7 +152,7 @@ impl SFU {
                     continue;
                 }
             };
-            eprintln!("<< got {} bytes from UDP src: {}", n, src_udp);
+            println!("<< got {} bytes from UDP src: {}", n, src_udp);
 
             sessions.map_udp_to_tcp(src_udp).await;
             if let Some(dst_udp) = sessions.get_peer_udp(&src_udp).await {
@@ -175,7 +174,7 @@ impl SFU {
                 }
 
                 match socket.send_to(&buf[..n], &dst_udp).await {
-                    Ok(sent) => eprintln!("forwarded {sent} bytes {src_udp} -> {dst_udp}"),
+                    Ok(sent) => println!("forwarded {sent} bytes {src_udp} -> {dst_udp}"),
                     Err(e) => eprintln!("udp send error {dst_udp}: {e}"),
                 }
             } else {

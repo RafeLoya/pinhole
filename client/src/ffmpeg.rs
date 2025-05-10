@@ -1,6 +1,6 @@
+use regex::Regex;
 use std::error::Error;
 use std::process::{Child, Command, Stdio};
-use regex::Regex;
 
 /// Determines if `ffmpeg` has been installed and spawns a daemon to feed
 /// image frames to the program with default arguments
@@ -44,7 +44,6 @@ pub fn setup_default() -> Result<Child, Box<dyn std::error::Error>> {
     };
     Ok(daemon)
 }
-
 
 /// Query FFmpeg for DirectShow video devices on Windows.
 /// Returns a list like ["USB2.0 HD UVC WebCam", "OBS Virtual Camera"].
@@ -142,7 +141,7 @@ fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
         let cams = list_windows_cameras()?;
         let cam_name = cams
             .into_iter()
-            .find(|c| !c.contains("Virtual"))  // naïve filter
+            .find(|c| !c.contains("Virtual")) // naïve filter
             .unwrap_or_else(|| String::from("default"));
 
         cmd.args([
@@ -170,7 +169,7 @@ fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
             "low_delay",
             "pipe:1",
         ]);
-    }else {
+    } else {
         return Err("Current OS not supported".into());
     }
 

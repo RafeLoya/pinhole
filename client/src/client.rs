@@ -13,7 +13,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 
 /// Max amount of frames that can be buffered
 const FRAME_BUFFER: usize = 30;
@@ -148,7 +148,7 @@ impl Client {
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
-                
+
                 let mut next_frame = None;
                 loop {
                     match udp_rend.try_recv(&mut buf) {
@@ -170,12 +170,14 @@ impl Client {
                 }
                 let _ = renderer.render(&next_frame.unwrap());
 
-
                 let now = Instant::now();
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    eprintln!("BAD. Time over by {:?} ms!", (now - next_frame_time).as_millis());
+                    eprintln!(
+                        "BAD. Time over by {:?} ms!",
+                        (now - next_frame_time).as_millis()
+                    );
                 }
                 next_frame_time = Instant::now() + frame_interval;
             }
