@@ -162,7 +162,7 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit
+                                sleep(Duration::from_millis(1)).await;
                             }
                             //continue;
                         }

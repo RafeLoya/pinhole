@@ -114,10 +114,10 @@ fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
             "30",
             "-video_size",
             "640x480",
-            "-pixel_format",
-            "rgb24", // change to '-vcodec mjpeg'
+            "-vcodec",
+            "mjpeg", // change to '-vcodec mjpeg'
             "-i",
-            "video=Webcam",
+            "video=USB2.0 HD UVC WebCam",
             "-f",
             "rawvideo",
             "-pix_fmt",
