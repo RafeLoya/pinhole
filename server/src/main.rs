@@ -49,3 +49,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Args;
+    use clap::Parser;
+
+    #[test]
+    fn test_args_defaults() {
+        let args = Args::parse_from(&["test"]);
+        assert_eq!(args.tcp_addr, "0.0.0.0:8080");
+        assert_eq!(args.udp_addr, "0.0.0.0:4433");
+        assert_eq!(args.log_file, "debug.log");
+        assert!(!args.verbose);
+    }
+
+    #[test]
+    fn test_args_custom_values() {
+        let args = Args::parse_from(&[
+            "test",
+            "--tcp-addr", "127.0.0.1:1234",
+            "--udp-addr", "127.0.0.1:5678",
+            "--log-file", "custom.log",
+            "--verbose",
+        ]);
+        assert_eq!(args.tcp_addr, "127.0.0.1:1234");
+        assert_eq!(args.udp_addr, "127.0.0.1:5678");
+        assert_eq!(args.log_file, "custom.log");
+        assert!(args.verbose);
+    }
+}

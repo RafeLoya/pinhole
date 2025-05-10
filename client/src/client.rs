@@ -170,7 +170,6 @@ impl Client {
                 if next_frame > now {
                     sleep(next_frame - now).await;
                 }
-                eprintln!("time to sleep {:?}", next_frame - now);
                 next_frame = Instant::now() + frame_interval;
             }
         });

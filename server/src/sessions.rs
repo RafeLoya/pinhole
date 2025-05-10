@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::sync::{mpsc, RwLock};
 
+#[derive(Clone)]
 pub enum Message {
     AsciiFrame(Vec<u8>),
     Connect(String),
@@ -314,5 +315,124 @@ impl SessionManager {
     pub async fn is_connected(&self, id: &str) -> bool {
         let inner = self.inner.read().await;
         inner.sessions.get(id).map(|s| s.connected_notified).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_session_creation() {
+        let session = Session::new("test_session".to_string());
+        assert_eq!(session.id, "test_session");
+        assert!(session.client_a.is_none());
+        assert!(session.client_b.is_none());
+        assert!(session.udp_a.is_none());
+        assert!(session.udp_b.is_none());
+        assert!(!session.connected_notified);
+    }
+
+    #[tokio::test]
+    async fn test_add_client() {
+        let mut session = Session::new("test_session".to_string());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let addr = "127.0.0.1:8080".parse().unwrap();
+
+        assert!(session.add_client(addr, tx));
+        assert!(session.client_a.is_some());
+        assert!(session.client_b.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_register_udp() {
+        let mut session = Session::new("test_session".to_string());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let tcp_addr = "127.0.0.1:8080".parse().unwrap();
+        let udp_addr = "127.0.0.1:9090".parse().unwrap();
+
+        session.add_client(tcp_addr, tx);
+        session.register_udp(tcp_addr, udp_addr);
+
+        assert_eq!(session.udp_a, Some(udp_addr));
+    }
+
+    #[tokio::test]
+    async fn test_remove_client() {
+        let mut session = Session::new("test_session".to_string());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let addr = "127.0.0.1:8080".parse().unwrap();
+
+        session.add_client(addr, tx);
+        session.remove_client(&addr);
+
+        assert!(session.client_a.is_none());
+        assert!(session.udp_a.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_manager_add_client() {
+        let manager = SessionManager::new();
+        let session_id = "test_session";
+        let tcp_addr = "127.0.0.1:8080".parse().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        manager.ensure_session(session_id).await;
+        let added = manager.add_client(session_id, tcp_addr, tx).await;
+
+        assert!(added);
+
+        let session = manager.inner.read().await;
+        assert!(session.client_sessions.contains_key(&tcp_addr));
+        assert!(session.sessions.contains_key(session_id));
+        assert!(session.sessions[session_id].client_a.is_some());
+        assert!(session.sessions[session_id].client_b.is_none());
+
+        let session = session.sessions.get(session_id).unwrap();
+        assert_eq!(session.client_a.as_ref().unwrap().0, tcp_addr);
+        assert!(session.client_b.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_manager_register_udp() {
+        let manager = SessionManager::new();
+        let session_id = "test_session";
+        let tcp_addr = "127.0.0.1:8080".parse().unwrap();
+        let udp_addr = "127.0.0.1:9090".parse().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        manager.ensure_session(session_id).await;
+        manager.add_client(session_id, tcp_addr, tx).await;
+        manager.register_udp(tcp_addr, udp_addr).await;
+
+        let peer_udp = manager.get_peer_udp(&udp_addr).await;
+        assert!(peer_udp.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_manager_remove_client() {
+        let manager = SessionManager::new();
+        let session_id = "test_session";
+        let tcp_addr = "127.0.0.1:8080".parse().unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+
+        manager.ensure_session(session_id).await;
+        manager.add_client(session_id, tcp_addr, tx).await;
+        manager.remove_client(&tcp_addr).await;
+
+        assert!(manager.session_id_for(&tcp_addr).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_mark_and_check_connected() {
+        let manager = SessionManager::new();
+        let session_id = "test_session";
+
+        manager.ensure_session(session_id).await;
+        assert!(!manager.is_connected(session_id).await);
+
+        manager.mark_connected(session_id).await;
+        assert!(manager.is_connected(session_id).await);
     }
 }

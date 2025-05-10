@@ -113,8 +113,8 @@ impl SFU {
                         Some("JOIN") => {
                             if let Some(id) = parts.next() {
                                 sessions.ensure_session(id).await;
-                                if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
-                                    println!("Sending to {}: OK: joined session", addr);
+                                if sessions.add_client(id, addr, peer_tx.clone()).await {
+                                    println!("Sending to {}: OK: joined session: {id}", addr);
                                     wr.write_all(b"OK: joined session\n").await?;
                                 } else {
                                     println!("Sending to {}: ERROR: session full", addr);
@@ -182,5 +182,51 @@ impl SFU {
                 eprintln!("no peer for UDP {src_udp}")
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::{TcpStream, UdpSocket};
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    fn init_sfu() -> SFU {
+        SFU::new(
+            "127.0.0.1:8043".to_string(),
+            "127.0.0.1:8044".to_string(),
+            "sfu_test.log".to_string(),
+            false,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_tcp_join_and_leave() {
+        let sfu = init_sfu();
+
+        // Start the SFU server in background
+        tokio::spawn(async move {
+            sfu.run().await.expect("SFU run failed");
+        });
+
+        // Let the server start
+        sleep(Duration::from_millis(100)).await;
+
+        // Connect to TCP
+        let mut stream = TcpStream::connect("127.0.0.1:8043").await.unwrap();
+
+        // Send JOIN command
+        stream.write_all(b"JOIN room1\n").await.unwrap();
+        let mut response = vec![0u8; 1024];
+        let n = stream.read(&mut response).await.unwrap();
+        let text = String::from_utf8_lossy(&response[..n]);
+        assert!(text.contains("OK: joined session"));
+
+        // Send LEAVE command
+        stream.write_all(b"LEAVE\n").await.unwrap();
+        let n = stream.read(&mut response).await.unwrap();
+        let text = String::from_utf8_lossy(&response[..n]);
+        assert!(text.contains("OK: left session"));
     }
 }
