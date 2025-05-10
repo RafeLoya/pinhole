@@ -188,8 +188,8 @@ impl SFU {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::{TcpStream, UdpSocket};
     use std::time::Duration;
+    use tokio::net::{TcpStream, UdpSocket};
     use tokio::time::sleep;
 
     fn init_sfu() -> SFU {

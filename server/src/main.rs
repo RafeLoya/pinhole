@@ -68,9 +68,12 @@ mod tests {
     fn test_args_custom_values() {
         let args = Args::parse_from(&[
             "test",
-            "--tcp-addr", "127.0.0.1:1234",
-            "--udp-addr", "127.0.0.1:5678",
-            "--log-file", "custom.log",
+            "--tcp-addr",
+            "127.0.0.1:1234",
+            "--udp-addr",
+            "127.0.0.1:5678",
+            "--log-file",
+            "custom.log",
             "--verbose",
         ]);
         assert_eq!(args.tcp_addr, "127.0.0.1:1234");

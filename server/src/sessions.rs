@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 #[derive(Clone)]
 pub enum Message {
@@ -283,16 +283,20 @@ impl SessionManager {
                             .filter(|(b, _)| b == *tcp)
                             .map(|_| session.udp_b.is_none())
                             .unwrap_or(false);
-                        
+
                         unregistered_a || unregistered_b
                     })
                     .unwrap_or(false)
             })
             .copied();
-        
+
         if let Some(tcp_addr) = candidate {
             let s_id = inner.client_sessions.get(&tcp_addr).unwrap().clone();
-            inner.sessions.get_mut(&s_id).unwrap().register_udp(tcp_addr, udp_src);
+            inner
+                .sessions
+                .get_mut(&s_id)
+                .unwrap()
+                .register_udp(tcp_addr, udp_src);
             inner.udp_to_tcp.insert(udp_src, tcp_addr);
             println!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
         } else {
@@ -304,17 +308,21 @@ impl SessionManager {
         let inner = self.inner.read().await;
         inner.udp_to_tcp.get(udp_src).copied()
     }
-    
+
     pub async fn mark_connected(&self, id: &str) {
         let mut inner = self.inner.write().await;
         if let Some(s) = inner.sessions.get_mut(id) {
             s.connected_notified = true;
         }
     }
-    
+
     pub async fn is_connected(&self, id: &str) -> bool {
         let inner = self.inner.read().await;
-        inner.sessions.get(id).map(|s| s.connected_notified).unwrap_or(false)
+        inner
+            .sessions
+            .get(id)
+            .map(|s| s.connected_notified)
+            .unwrap_or(false)
     }
 }
 
