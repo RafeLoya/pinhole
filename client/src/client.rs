@@ -78,7 +78,6 @@ impl Client {
 
         // establish UDP socket
         let udp_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
-        // let local_udp_addr = udp_socket.local_addr()?;
         udp_socket.connect(&self.server_udp_addr).await?;
 
         // === SESSION HANDSHAKE (JOIN + REGISTER_UDP) ============================================
@@ -126,7 +125,6 @@ impl Client {
 
                 match &buf[..n] {
                     msg if msg.starts_with(b"CONNECTED") => {
-                        //println!("CONTROL: got CONNECTED");
                         let _ = ctrl_peer_tx.send(true);
                     }
                     msg if msg.starts_with(b"DISCONNECTED") => {
@@ -145,26 +143,33 @@ impl Client {
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
-            // let mut ticker = interval(frame_interval);
-            // ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            let mut next_frame = Instant::now() + frame_interval;
+            let mut next_frame_time = Instant::now() + frame_interval;
 
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
-
-                // ticker.tick().await;
-                match udp_rend.recv(&mut buf).await {
-                    Ok(n) => {
-                        if let Ok(frame) = renderer.process_datagram(&buf[..n]) {
-                            let _ = renderer.render(&frame);
+                
+                let mut next_frame = None;
+                loop {
+                    match udp_rend.try_recv(&mut buf) {
+                        Ok(n) => {
+                            if let Ok(frame) = renderer.process_datagram(&buf[..n]) {
+                                next_frame = Some(frame);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("UDP receive error: {e}");
+                            if next_frame.is_some() {
+                                break;
+                            } else {
+                                // sleep for a tiny bit
+                            }
+                            //continue;
                         }
                     }
-                    Err(e) => {
-                        eprintln!("UDP receive error: {e}");
-                        //continue;
-                    }
                 }
+                let _ = renderer.render(&next_frame.unwrap());
+
 
                 let now = Instant::now();
                 if next_frame > now {

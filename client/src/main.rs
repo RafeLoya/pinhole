@@ -59,6 +59,7 @@ struct Args {
     #[arg(short = 's', long, default_value = "")]
     session_id: String,
 
+    /// Test pattern (if not using a camera)
     #[arg(short = 'p', long)]
     test_pattern: Option<TestPattern>,
 }
