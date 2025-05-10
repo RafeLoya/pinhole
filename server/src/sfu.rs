@@ -47,9 +47,9 @@ impl SFU {
 
         if self.verbose {
             println!("SFU server starting with configurations:");
-            println!("\tTCP control address: {}", self.tcp_addr);
-            println!("\tUDP data address: {}", self.udp_addr);
-            println!("\tLog file: {}", self.log_file);
+            println!(" - TCP control address: {}", self.tcp_addr);
+            println!(" - UDP data address: {}", self.udp_addr);
+            println!(" - Log file: {}", self.log_file);
         } else {
             println!("SFU server starting...");
         }
@@ -189,7 +189,7 @@ impl SFU {
 mod tests {
     use super::*;
     use std::time::Duration;
-    use tokio::net::{TcpStream, UdpSocket};
+    use tokio::net::TcpStream;
     use tokio::time::sleep;
 
     fn init_sfu() -> SFU {
