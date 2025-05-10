@@ -94,7 +94,7 @@ impl AsciiRenderer {
         let h = usize::from_be_bytes(h_bytes);
 
         AsciiFrame::from_bytes(w, h, &datagram[16..])
-        
+
         // if w * h + 16 > datagram.len() {
         //     return Err(format!(
         //         "incomplete frame: expected {} bytes but got {}",
@@ -103,7 +103,7 @@ impl AsciiRenderer {
         //     )
         //     .into());
         // }
-        // 
+        //
         // // TODO: review this
         // AsciiFrame::from_bytes(w, h, &datagram[16..16 + w * h])
     }
