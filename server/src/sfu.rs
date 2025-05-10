@@ -153,7 +153,7 @@ impl SFU {
                     continue;
                 }
             };
-            println!("<< got {} bytes from UDP src: {}", n, src_udp);
+            eprintln!("<< got {} bytes from UDP src: {}", n, src_udp);
 
             sessions.map_udp_to_tcp(src_udp).await;
             if let Some(dst_udp) = sessions.get_peer_udp(&src_udp).await {
@@ -175,7 +175,7 @@ impl SFU {
                 }
 
                 match socket.send_to(&buf[..n], &dst_udp).await {
-                    Ok(sent) => println!("forwarded {sent} bytes {src_udp} -> {dst_udp}"),
+                    Ok(sent) => eprintln!("forwarded {sent} bytes {src_udp} -> {dst_udp}"),
                     Err(e) => eprintln!("udp send error {dst_udp}: {e}"),
                 }
             } else {

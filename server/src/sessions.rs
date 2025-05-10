@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use tokio::sync::{mpsc, RwLock};
+use std::path::Component::ParentDir;
+use tokio::sync::{RwLock, mpsc};
 
 pub enum Message {
     AsciiFrame(Vec<u8>),
@@ -104,6 +105,9 @@ impl Session {
         {
             self.client_a = None;
             self.udp_a = None;
+            if self.client_b.is_some() {
+                self.connected_notified = false;
+            }
         } else if self
             .client_b
             .as_ref()
@@ -112,6 +116,9 @@ impl Session {
         {
             self.client_b = None;
             self.udp_b = None;
+            if self.client_a.is_some() {
+                self.connected_notified = false;
+            }
         }
     }
 
@@ -216,15 +223,92 @@ impl SessionManager {
     }
 
     pub async fn remove_client(&self, tcp: &SocketAddr) {
-        let mut inner = self.inner.write().await;
-        if let Some(id) = inner.client_sessions.remove(tcp) {
-            if let Some(s) = inner.sessions.get_mut(&id) {
-                s.remove_client(tcp);
-                if s.is_empty() {
-                    inner.sessions.remove(&id);
-                }
+        let (session_id, udp_addr, empty_after_removal) = {
+            let mut inner = self.inner.write().await;
+
+            if let Some(id) = inner.client_sessions.remove(tcp) {
+                let result = if let Some(s) = inner.sessions.get_mut(&id) {
+                    let udp = if s.client_a.as_ref().map(|(a, _)| a == tcp).unwrap_or(false) {
+                        s.udp_a
+                    } else if s.client_b.as_ref().map(|(b, _)| b == tcp).unwrap_or(false) {
+                        s.udp_b
+                    } else {
+                        None
+                    };
+
+                    s.remove_client(tcp);
+
+                    if !s.is_empty() && (s.client_a.is_none() || s.client_b.is_none()) {
+                        s.connected_notified = false;
+                    }
+
+                    let empty = s.is_empty();
+                    (Some(id.clone()), udp, empty)
+                } else {
+                    (Some(id), None, false)
+                };
+
+                result
+            } else {
+                (None, None, false)
+            }
+        };
+
+        if let Some(udp) = udp_addr {
+            let mut inner = self.inner.write().await;
+            inner.udp_to_tcp.remove(&udp);
+        }
+
+        if let Some(id) = session_id {
+            if empty_after_removal {
+                let mut inner = self.inner.write().await;
+                inner.sessions.remove(&id);
             }
         }
+
+        // let mut inner = self.inner.write().await;
+        // if let Some(id) = inner.client_sessions.remove(tcp) {
+        //     if let Some(s) = inner.sessions.get_mut(&id) {
+        //         // s.remove_client(tcp);
+        //         // if s.is_empty() {
+        //         //     inner.sessions.remove(&id);
+        //         // }
+        //
+        //         // find & remove UDP->TCP mapping for client
+        //         let udp_addr = if let Some((client_tcp, _)) = &s.client_a {
+        //             if client_tcp == tcp {
+        //                 s.udp_a
+        //             } else {
+        //                 None
+        //             }
+        //         } else if let Some((client_tcp, _)) = &s.client_b {
+        //             if client_tcp == tcp {
+        //                 s.udp_b
+        //             } else {
+        //                 None
+        //             }
+        //         } else {
+        //             None
+        //         };
+        //
+        //         if let Some(udp) = udp_addr {
+        //             inner.udp_to_tcp.remove(&udp);
+        //         }
+        //
+        //         s.remove_client(tcp);
+        //
+        //         if !s.is_empty() && (s.client_a.is_none() || s.client_b.is_none()) {
+        //             s.connected_notified = false;
+        //         }
+        //
+        //         if s.is_empty() {
+        //             inner.sessions.remove(&id);
+        //         }
+        //     }
+        // }
+
+        // TODO: optional?
+        //self.cleanup_udp_mappings().await;
     }
 
     /// Return peer's UDP address given your own TCP address
@@ -282,16 +366,20 @@ impl SessionManager {
                             .filter(|(b, _)| b == *tcp)
                             .map(|_| session.udp_b.is_none())
                             .unwrap_or(false);
-                        
+
                         unregistered_a || unregistered_b
                     })
                     .unwrap_or(false)
             })
             .copied();
-        
+
         if let Some(tcp_addr) = candidate {
             let s_id = inner.client_sessions.get(&tcp_addr).unwrap().clone();
-            inner.sessions.get_mut(&s_id).unwrap().register_udp(tcp_addr, udp_src);
+            inner
+                .sessions
+                .get_mut(&s_id)
+                .unwrap()
+                .register_udp(tcp_addr, udp_src);
             inner.udp_to_tcp.insert(udp_src, tcp_addr);
             println!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
         } else {
@@ -303,16 +391,34 @@ impl SessionManager {
         let inner = self.inner.read().await;
         inner.udp_to_tcp.get(udp_src).copied()
     }
-    
+
+    pub async fn cleanup_udp_mappings(&self) {
+        let mut inner = self.inner.write().await;
+        let udp_to_remove: Vec<SocketAddr> = inner
+            .udp_to_tcp
+            .iter()
+            .filter(|(_, tcp)| !inner.client_sessions.contains_key(tcp))
+            .map(|(udp, _)| *udp)
+            .collect();
+
+        for udp in udp_to_remove {
+            inner.udp_to_tcp.remove(&udp);
+        }
+    }
+
     pub async fn mark_connected(&self, id: &str) {
         let mut inner = self.inner.write().await;
         if let Some(s) = inner.sessions.get_mut(id) {
             s.connected_notified = true;
         }
     }
-    
+
     pub async fn is_connected(&self, id: &str) -> bool {
         let inner = self.inner.read().await;
-        inner.sessions.get(id).map(|s| s.connected_notified).unwrap_or(false)
+        inner
+            .sessions
+            .get(id)
+            .map(|s| s.connected_notified)
+            .unwrap_or(false)
     }
 }
