@@ -168,18 +168,17 @@ impl Client {
                             }
                         }
                     }
+                }
+                let _ = renderer.render(&next_frame.unwrap());
 
-                    if let Some(frame) = next_frame.take() {
-                        if let Err(e) = renderer.render(&frame) {
-                            eprintln!("Render error: {e}");
-                        }
-                    }
-
-                    let now = Instant::now();
-                    if next_frame_time > now {
-                        sleep(next_frame_time - now).await;
-                    }
-                    next_frame_time += frame_interval;
+                let now = Instant::now();
+                if next_frame_time > now {
+                    sleep(next_frame_time - now).await;
+                } else {
+                    eprintln!(
+                        "BAD. Time over by {:?} ms!",
+                        (now - next_frame_time).as_millis()
+                    );
                 }
             }
         });
