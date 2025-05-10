@@ -90,46 +90,46 @@ impl SFU {
         let mut cmd_buf = vec![0u8; 1024];
         loop {
             select! {
-                    // session notifications
-                    Some(msg) = peer_rx.recv() => {
-                        let line: &str = match msg {
-                            Message::Connect(_) => "CONNECTED\n",
-                            Message::Disconnect => "DISCONNECTED\n",
-                            _ => continue
-                        };
-                        println!("Sending to {}: {}", addr, line.trim());
-                        wr.write_all(line.as_bytes()).await?;
+                // session notifications
+                Some(msg) = peer_rx.recv() => {
+                    let line: &str = match msg {
+                        Message::Connect(_) => "CONNECTED\n",
+                        Message::Disconnect => "DISCONNECTED\n",
+                        _ => continue
+                    };
+                    println!("Sending to {}: {}", addr, line.trim());
+                    wr.write_all(line.as_bytes()).await?;
+                }
+                result = rd.read(&mut cmd_buf) => {
+                    let n = result?;
+                    if n == 0 {
+                        // client has closed connection
+                        break;
                     }
-                    result = rd.read(&mut cmd_buf) => {
-                        let n = result?;
-                        if n == 0 {
-                            // client has closed connection
-                            break;
-                        }
-                        let line = std::str::from_utf8(&cmd_buf[..n])?.trim();
-                        let mut parts = line.split_whitespace();
-                        match parts.next() {
-                            Some("JOIN") => {
-                                if let Some(id) = parts.next() {
-                                    sessions.ensure_session(id).await;
-                                    if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
-                                        println!("Sending to {}: OK: joined session", addr);
-                                        wr.write_all(b"OK: joined session\n").await?;
-                                    } else {
-                                        println!("Sending to {}: ERROR: session full", addr);
-                                        wr.write_all(b"ERROR: session full\n").await?;
-                                    }
+                    let line = std::str::from_utf8(&cmd_buf[..n])?.trim();
+                    let mut parts = line.split_whitespace();
+                    match parts.next() {
+                        Some("JOIN") => {
+                            if let Some(id) = parts.next() {
+                                sessions.ensure_session(id).await;
+                                if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
+                                    println!("Sending to {}: OK: joined session", addr);
+                                    wr.write_all(b"OK: joined session\n").await?;
+                                } else {
+                                    println!("Sending to {}: ERROR: session full", addr);
+                                    wr.write_all(b"ERROR: session full\n").await?;
                                 }
                             }
-                            Some("LEAVE") => {
-                                sessions.notify_peer(&addr, Message::Disconnect).await;
-                                sessions.remove_client(&addr).await;
-                                println!("Sending to {}: OK: left session", addr);
-                                wr.write_all(b"OK: left session\n").await?;
-                            }
-                            _ => {
-                                // println!("Sending to {}: ERROR: unknown command", addr);
-                                // wr.write_all(b"ERROR: unknown command\n").await?;
+                        }
+                        Some("LEAVE") => {
+                            sessions.notify_peer(&addr, Message::Disconnect).await;
+                            sessions.remove_client(&addr).await;
+                            println!("Sending to {}: OK: left session", addr);
+                            wr.write_all(b"OK: left session\n").await?;
+                        }
+                        _ => {
+                            // println!("Sending to {}: ERROR: unknown command", addr);
+                            // wr.write_all(b"ERROR: unknown command\n").await?;
                         }
                     }
                 }

@@ -76,7 +76,7 @@ fn list_windows_cameras() -> Result<Vec<String>, Box<dyn Error>> {
 /// `ffmpeg` CLI with the appropriate arguments
 ///
 /// TODO: verify Windows / Linux compatibility
-fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn std::error::Error>> {
+fn os_setup(cmd: &mut Command) -> Result<(), Box<dyn Error>> {
     if cfg!(target_os = "macos") {
         println!("MacOS detected");
         cmd.args([
