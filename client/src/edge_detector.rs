@@ -2,6 +2,7 @@ use crate::image_frame::ImageFrame;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 // TODO: Look into Robert's Cross operator as potential alternative (if slow performance)
 // TODO: Remove `.unwrap()`s in the future for error recovery

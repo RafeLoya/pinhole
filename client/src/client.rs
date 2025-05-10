@@ -13,7 +13,7 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{Instant, sleep};
+use tokio::time::{sleep, Instant};
 
 /// Max amount of frames that can be buffered
 const FRAME_BUFFER: usize = 30;
@@ -101,7 +101,7 @@ impl Client {
         // TODO: broadcast channel (ring buffer)? drops oldest frame automatically
         let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
 
-        // === SESSION CONTROL / TCP LOOP =========================================================
+        // === TCP SESSION CONTROL ================================================================
         // Reads control messages from server, updating local state about
         // session connection and / or peer presence.
         let ctrl_conn_tx = self.conn_flag_tx.clone();
@@ -135,7 +135,7 @@ impl Client {
             }
         });
 
-        // === FRAME RENDERING / UDP LOOP =========================================================
+        // === FRAME RENDERING ====================================================================
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
@@ -148,7 +148,7 @@ impl Client {
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
-
+                
                 let mut next_frame = None;
                 loop {
                     match udp_rend.try_recv(&mut buf) {
@@ -170,14 +170,12 @@ impl Client {
                 }
                 let _ = renderer.render(&next_frame.unwrap());
 
+
                 let now = Instant::now();
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    eprintln!(
-                        "BAD. Time over by {:?} ms!",
-                        (now - next_frame_time).as_millis()
-                    );
+                    eprintln!("BAD. Time over by {:?} ms!", (now - next_frame_time).as_millis());
                 }
                 next_frame_time = Instant::now() + frame_interval;
             }
