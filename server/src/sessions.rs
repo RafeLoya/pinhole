@@ -195,7 +195,7 @@ impl SessionManager {
 
     pub async fn get_peer_udp(&self, udp_src: &SocketAddr) -> Option<SocketAddr> {
         let inner = self.inner.read().await;
-        let tcp = inner.udp_to_tcp.get(&udp_src)?;
+        let tcp = inner.udp_to_tcp.get(udp_src)?;
         let id = inner.client_sessions.get(tcp)?;
 
         inner.sessions.get(id)?.get_peer_udp(tcp)

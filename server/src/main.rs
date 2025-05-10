@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn test_args_defaults() {
-        let args = Args::parse_from(&["test"]);
+        let args = Args::parse_from(["test"]);
         assert_eq!(args.tcp_addr, "0.0.0.0:8080");
         assert_eq!(args.udp_addr, "0.0.0.0:4433");
         assert_eq!(args.log_file, "debug.log");
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_args_custom_values() {
-        let args = Args::parse_from(&[
+        let args = Args::parse_from([
             "test",
             "--tcp-addr",
             "127.0.0.1:1234",

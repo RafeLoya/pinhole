@@ -139,7 +139,7 @@ impl Client {
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
-        let frame_interval = Duration::from_millis((1000 / FPS));
+        let frame_interval = Duration::from_millis(1000 / FPS);
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();

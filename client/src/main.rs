@@ -78,8 +78,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("connection to session: {}", session_id);
 
-    let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
-    if let Some(_) = &pattern_type {
+    let pattern_type = args.test_pattern.map(PatternType::from);
+    if pattern_type.is_some() {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 

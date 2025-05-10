@@ -182,11 +182,11 @@ impl AsciiConverter {
         let char_i = ((magnitude / 255.0) * (self.ascii_horizontal.len() as f32))
             .min((self.ascii_horizontal.len() - 1) as f32) as usize;
 
-        if (angle_d >= 0.0 && angle_d < 22.5) || (angle_d >= 157.5 && angle_d < 180.0) {
+        if (0.0..22.5).contains(&angle_d) || (157.5..180.0).contains(&angle_d) {
             self.ascii_horizontal[char_i.min(self.ascii_horizontal.len() - 1)]
-        } else if (angle_d >= 22.5) && (angle_d < 67.5) {
+        } else if (22.5..67.5).contains(&angle_d) {
             self.ascii_forward[char_i.min(self.ascii_forward.len() - 1)]
-        } else if (angle_d >= 67.5) && (angle_d < 112.5) {
+        } else if (67.5..112.5).contains(&angle_d) {
             self.ascii_vertical[char_i.min(self.ascii_vertical.len() - 1)]
         } else {
             self.ascii_back[char_i.min(self.ascii_back.len() - 1)]

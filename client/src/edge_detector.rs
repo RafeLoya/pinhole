@@ -2,7 +2,6 @@ use crate::image_frame::ImageFrame;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 // TODO: Look into Robert's Cross operator as potential alternative (if slow performance)
 // TODO: Remove `.unwrap()`s in the future for error recovery
@@ -252,15 +251,15 @@ impl EdgeDetector {
                 // normalize to 0-180 degrees
                 let angle_deg = (angle[i].to_degrees() + 180.0) % 180.0;
 
-                let (nx1, ny1, nx2, ny2) = if (angle_deg >= 0.0 && angle_deg < 22.5)
-                    || (angle_deg >= 157.5 && angle_deg < 180.0)
+                let (nx1, ny1, nx2, ny2) = if (0.0..22.5).contains(&angle_deg)
+                    || (157.5..180.0).contains(&angle_deg)
                 {
                     // horizontal edge
                     (x + 1, y, x - 1, y)
-                } else if angle_deg >= 22.5 && angle_deg < 67.5 {
+                } else if (22.5..67.5).contains(&angle_deg) {
                     // forward edge (/)
                     (x + 1, y - 1, x - 1, y + 1)
-                } else if angle_deg >= 67.5 && angle_deg < 112.5 {
+                } else if (67.5..112.5).contains(&angle_deg) {
                     // vertical edge
                     (x, y - 1, x, y + 1)
                 } else {
