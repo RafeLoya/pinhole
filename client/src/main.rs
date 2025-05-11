@@ -73,10 +73,6 @@ struct Args {
     #[arg(short = 'u', long, default_value = "127.0.0.1:4433")]
     udp_addr: String,
 
-    /// Session ID to join (random if not given)
-    #[arg(short = 's', long, default_value = "")]
-    session_id: String,
-
     /// Test pattern (if not using a camera)
     #[arg(short = 'p', long)]
     test_pattern: Option<TestPattern>,
