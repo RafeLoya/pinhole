@@ -9,8 +9,6 @@ use tokio::{select, task};
 use crate::sessions::{Message, SessionManager};
 use common::logger::Logger;
 
-// TODO: JSON structuring vs regular sentence!
-
 /// Server acting as a Selective Forwarding Unit for connected clients,
 /// responsible for session control (TCP) and frame forwarding (UDP)
 pub struct SFU {
@@ -59,13 +57,14 @@ impl SFU {
         let udp_sessions = self.sessions.clone();
         task::spawn(Self::udp_loop(udp, udp_sessions));
 
+        // === TCP CONTROL TASK ===================================================================
         let tcp_listener = tokio::net::TcpListener::bind(&self.tcp_addr).await?;
         logger.info(&format!(
             "TCP control channel listening on: {}",
             self.tcp_addr
         ))?;
 
-        // === TCP CONTROL TASK ===================================================================
+        // accept new connections
         loop {
             let (socket, addr) = tcp_listener.accept().await?;
             logger.info(&format!("new TCP control connection from: {}", addr))?;
@@ -79,6 +78,7 @@ impl SFU {
         }
     }
 
+    /// Handles control messages, sending & receiving them from peers
     async fn handle_client(
         socket: TcpStream,
         addr: SocketAddr,
@@ -142,6 +142,7 @@ impl SFU {
         Ok(())
     }
 
+    /// Handles UDP registration and frame forwarding
     pub async fn udp_loop(socket: UdpSocket, sessions: Arc<SessionManager>) {
         let mut buf = vec![0u8; 65536];
 
@@ -175,9 +176,9 @@ impl SFU {
                 }
 
                 match socket.send_to(&buf[..n], &dst_udp).await {
-                    Ok(sent) => {
+                    Ok(_) => {
                         //println!("forwarded {sent} bytes {src_udp} -> {dst_udp}")
-                    },
+                    }
                     Err(e) => eprintln!("udp send error {dst_udp}: {e}"),
                 }
             } else {
