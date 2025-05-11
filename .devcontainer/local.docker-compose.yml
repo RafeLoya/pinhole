@@ -21,7 +21,6 @@ services:
 
       # More similar to how I have the container set up on GCP
       # - ../server:/app/server
-      # - ../common:/app/common
 
       # Mount cargo registry and git to cache dependencies
       - cargo-registry:/usr/local/cargo/registry

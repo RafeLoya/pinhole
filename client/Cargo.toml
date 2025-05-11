@@ -7,8 +7,6 @@ repository = "https://github.com/csi4321/final-project-group4_s25"
 description = "Client for terminal-based video call service with ASCII streaming"
 
 [dependencies]
-common = { path = "../common" }
-
 tokio = { version = "1.40", features = ["full"] }
 clap = { version = "4.5.37", features = ["derive"] }
 rand = "0.9.1"
