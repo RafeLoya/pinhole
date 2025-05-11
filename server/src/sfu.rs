@@ -54,6 +54,8 @@ impl SFU {
             println!("\tLog file: {}", self.logger.get_log_file());
         }
 
+        logger.info("SFU server starting")?;
+
         // === UDP TASK ===========================================================================
 
         let udp = UdpSocket::bind(&self.udp_addr).await?;
@@ -142,7 +144,7 @@ impl SFU {
 
         sessions.notify_peer(&addr, Message::Disconnect).await;
         sessions.remove_client(&addr).await;
-        logger.info(&format!("{} cleanup complete", addr))?;
+        logger.info(&format!("{} disconnected", addr))?;
         Ok(())
     }
 
