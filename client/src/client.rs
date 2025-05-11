@@ -94,7 +94,7 @@ impl Client {
         let _ = self.conn_flag_tx.send(true);
 
         // println!("joined session: {}", self.session_id);
-        
+
         let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
 
         // === TCP SESSION CONTROL ================================================================
