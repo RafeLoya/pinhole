@@ -117,7 +117,7 @@ impl Client {
                     }
                     Ok(n) => n,
                     Err(e) => {
-                        eprintln!("TCP read error: {e}");
+                        eprintln!("[CONTROL] TCP read error: {e}");
                         let _ = ctrl_conn_tx.send(false);
                         break;
                     }
@@ -157,8 +157,8 @@ impl Client {
                                 next_frame = Some(frame);
                             }
                         }
-                        Err(e) => {
-                            eprintln!("UDP receive error: {e}");
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            //eprintln!("UDP receive error: {e}");
                             if next_frame.is_some() {
                                 break;
                             } else {
@@ -166,6 +166,15 @@ impl Client {
                                 sleep(Duration::from_millis(1)).await;
                             }
                             //continue;
+                        }
+                        Err(e) => {
+                            eprintln!("[RENDER] UDP receive error: {e}");
+                            if next_frame.is_some() {
+                                break;
+                            } else {
+                                // sleep for a tiny bit
+                                sleep(Duration::from_millis(1)).await;
+                            }
                         }
                     }
                 }
@@ -176,7 +185,7 @@ impl Client {
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    eprintln!("BAD. Time over by {:?} ms!", (now - next_frame_time).as_millis());
+                    eprintln!("[RENDER] Time over by {:?} ms!", (now - next_frame_time).as_millis());
                 }
                 next_frame_time = Instant::now() + frame_interval;
             }

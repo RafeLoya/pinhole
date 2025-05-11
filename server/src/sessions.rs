@@ -293,9 +293,9 @@ impl SessionManager {
             let s_id = inner.client_sessions.get(&tcp_addr).unwrap().clone();
             inner.sessions.get_mut(&s_id).unwrap().register_udp(tcp_addr, udp_src);
             inner.udp_to_tcp.insert(udp_src, tcp_addr);
-            println!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
+            println!("[FORWARD] registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
         } else {
-            eprintln!("UDP {} could not be matched to any client", udp_src);
+            eprintln!("[FORWARD] UDP {} could not be matched to any client", udp_src);
         }
     }
 
