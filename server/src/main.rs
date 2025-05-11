@@ -1,7 +1,8 @@
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncWriteExt, Interest},
-    net::{TcpListener, TcpStream}, sync::Mutex,
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
 };
 
 pub const HELLO_BYTE: u8 = 0x69;
@@ -28,30 +29,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     //listen to udp
     let user_to_user_connections_clone = user_to_user_connections.clone();
     tokio::spawn(async move {
-
         let user_to_user_connections = user_to_user_connections_clone;
 
-        let mut usernames_to_addresses: std::collections::HashMap<String, SocketAddr> = std::collections::HashMap::new();
+        let mut usernames_to_addresses: std::collections::HashMap<String, SocketAddr> =
+            std::collections::HashMap::new();
 
-        let mut buf = [0u8; 257];
+        let mut buf = [0u8; 8192];
         loop {
-
             match udp_listener.recv_from(&mut buf).await {
                 Ok((n, addr)) => {
-
-                    if n < 2 {
+                    if n < 3 {
+                        eprintln!("Packet too small to process, skipping...");
                         continue;
                     }
                     let hello_byte = buf[0];
-                    let username_length = buf[1];
-                    if username_length < 1 || username_length + 2 > n as u8 {
+                    let username_length = u16::from_be_bytes([buf[1], buf[2]]) as usize;
+                    if username_length < 1 || username_length + 3 > n {
+                        eprintln!(
+                            "Invalid username length: {}, packet size: {}, skipping...",
+                            username_length, n
+                        );
                         continue;
                     }
-                    let username = &buf[2..(2 + username_length as usize)];
+                    let username = &buf[3..(3 + username_length)];
                     let username_str = String::from_utf8_lossy(username).to_string();
                     if hello_byte == HELLO_BYTE {
                         usernames_to_addresses.insert(username_str.clone(), addr);
-
                     } else {
                         let client_a_addr = addr;
 
@@ -60,12 +63,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             .iter()
                             .find(|(_, v)| *v == &client_a_addr)
                         {
+
                             // Find the corresponding user-to-user connection
                             let client_b_username = {
                                 let connections = user_to_user_connections.lock().await;
                                 connections
                                     .iter()
-                                    .find(|(user_a, user_b)| user_a == client_a_username || user_b == client_a_username)
+                                    .find(|(user_a, user_b)| {
+                                        user_a == client_a_username || user_b == client_a_username
+                                    })
                                     .map(|(user_a, user_b)| {
                                         if user_a == client_a_username {
                                             user_b.clone()
@@ -76,14 +82,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             };
 
                             if let Some(client_b_username) = client_b_username {
-                                if let Some(client_b_addr) = usernames_to_addresses.get(&client_b_username) {
-                                    let _ = udp_listener.send_to(&buf[2..n], client_b_addr).await;
+
+                                if let Some(client_b_addr) =
+                                    usernames_to_addresses.get(&client_b_username)
+                                {
+                                    
+                                    if let Err(e) = udp_listener.send_to(&buf[3..n], client_b_addr).await {
+                                        eprintln!(
+                                            "Failed to forward message from {:?} to {:?}: {}",
+                                            client_a_addr, client_b_addr, e
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                Err(_) => {}
+                Err(e) => {
+                    eprintln!("Error receiving UDP packet: {}", e);
+                }
             }
         }
     });
@@ -96,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let user_to_user_connections = user_to_user_connections.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = handle_tcp_socket(socket, usernames.clone(), user_to_user_connections.clone()).await {
+            if let Err(e) =
+                handle_tcp_socket(socket, usernames.clone(), user_to_user_connections.clone()).await
+            {
                 eprintln!("Error handling socket for {}: {}", addr, e);
             }
 
@@ -120,8 +139,9 @@ async fn handle_tcp_socket(
     send_usernames_list(&mut socket, &usernames).await?;
 
     loop {
-        if let Some((user_a, user_b)) = handle_connection_request(&mut socket, &usernames, &current_username).await? {
-
+        if let Some((user_a, user_b)) =
+            handle_connection_request(&mut socket, &usernames, &current_username).await?
+        {
             // add connection to the list of connections
             let mut connections = user_to_user_connections.lock().await;
             connections.push((user_a.clone(), user_b.clone()));
@@ -130,8 +150,7 @@ async fn handle_tcp_socket(
 
             socket.writable().await?;
             socket.write_all(&[0x00]).await?;
-        }
-        else {
+        } else {
             break;
         }
     }
@@ -143,9 +162,8 @@ async fn handle_tcp_socket(
     drop(list);
 
     let mut connections = user_to_user_connections.lock().await;
-    connections.retain(|(user_a, user_b)| {
-        user_a != &current_username && user_b != &current_username
-    });
+    connections
+        .retain(|(user_a, user_b)| user_a != &current_username && user_b != &current_username);
     drop(connections);
 
     Ok(())
