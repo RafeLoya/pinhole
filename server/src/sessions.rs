@@ -103,6 +103,7 @@ impl Session {
         {
             self.client_a = None;
             self.udp_a = None;
+            self.connected_notified = false;
         } else if self
             .client_b
             .as_ref()
@@ -111,6 +112,7 @@ impl Session {
         {
             self.client_b = None;
             self.udp_b = None;
+            self.connected_notified = false;
         }
     }
 
@@ -216,13 +218,34 @@ impl SessionManager {
 
     pub async fn remove_client(&self, tcp: &SocketAddr) {
         let mut inner = self.inner.write().await;
-        if let Some(id) = inner.client_sessions.remove(tcp) {
-            if let Some(s) = inner.sessions.get_mut(&id) {
-                s.remove_client(tcp);
-                if s.is_empty() {
-                    inner.sessions.remove(&id);
-                }
+        
+        let session_id = match inner.client_sessions.remove(tcp) {
+            Some(id) => id,
+            None => return,
+        };
+        
+        let session = match inner.sessions.get_mut(&session_id) {
+            Some(session) => session,
+            None => return,
+        };
+        
+        let is_empty_after_remove = {
+            session.remove_client(tcp);
+            session.connected_notified = false;
+            session.is_empty()
+        };
+        
+        inner.udp_to_tcp.retain(|_, mapped_tcp| {
+            let keep = mapped_tcp != tcp;
+            if !keep {
+                println!("[CONTROL] unregistered UDP mapping for TCP {}", tcp);
             }
+            keep
+        });
+        
+        if is_empty_after_remove {
+            inner.sessions.remove(&session_id);
+            println!("[CONTROL] removed empty session {}", session_id);
         }
     }
 
@@ -254,10 +277,15 @@ impl SessionManager {
     pub async fn map_udp_to_tcp(&self, udp_src: SocketAddr) {
         let mut inner = self.inner.write().await;
 
-        // make sure we don't have to perform the terrible awful thing
-        // that rears its ugly head below...
-        if inner.udp_to_tcp.contains_key(&udp_src) {
-            return;
+        // is UDP source mapped? check if its valid
+        if let Some(tcp_addr) = inner.udp_to_tcp.get(&udp_src).copied() {
+            if inner.client_sessions.contains_key(&tcp_addr) {
+                // connection still alive, keep the mapping
+                return;
+            } else {
+                // connection is gone, remove mapping
+                inner.udp_to_tcp.remove(&udp_src);
+            }
         }
 
         // Oh, God!

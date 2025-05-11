@@ -137,6 +137,7 @@ impl SFU {
             }
         }
 
+        println!("[CONTROL] Client {} disconnected, cleaning up", addr);
         sessions.notify_peer(&addr, Message::Disconnect).await;
         sessions.remove_client(&addr).await;
         Ok(())
