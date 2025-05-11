@@ -15,6 +15,8 @@ use crate::mock_frame_generator::PatternType;
 use clap::{Parser, ValueEnum};
 use rand::Rng;
 use std::error::Error;
+use std::fs;
+use std::collections::HashMap;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
@@ -24,6 +26,7 @@ enum TestPattern {
     MovingLine,
 }
 
+// TODO: this is really jank, probably not important tho if we will remove test patterns in future
 impl From<TestPattern> for PatternType {
     fn from(pattern: TestPattern) -> Self {
         match pattern {
@@ -61,14 +64,47 @@ struct Args {
     /// Test pattern (if not using a camera)
     #[arg(short = 'p', long)]
     test_pattern: Option<TestPattern>,
+
+    /// Optional keyfile to load connection info from
+    #[arg(short = 'k', long)]
+    keyfile: Option<String>,
+}
+
+fn parse_keyfile(path: &str) -> Result<HashMap<String, String>, Box<dyn Error>> {
+    let content = fs::read_to_string(path)?;
+    let mut map = HashMap::new();
+
+    for line in content.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            map.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+
+    Ok(map)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    tracing_subscriber::fmt::init();
+
+    // Override args from keyfile if provided
+    if let Some(ref path) = args.keyfile {
+        let map = parse_keyfile(path)?;
+
+        if let Some(tcp) = map.get("tcp_addr") {
+            args.tcp_addr = tcp.clone();
+        }
+        if let Some(udp) = map.get("udp_addr") {
+            args.udp_addr = udp.clone();
+        }
+        if let Some(sid) = map.get("session_id") {
+            args.session_id = sid.clone();
+        }
+    }
 
     let session_id = if args.session_id.is_empty() {
-        let rand_id: u32 = rand::rng().random();
+        let rand_id: u32 = rand::random();
         format!("session-{}", rand_id)
     } else {
         args.session_id.clone()
@@ -76,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("connection to session: {}", session_id);
 
-    let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
+    let pattern_type = args.test_pattern.map(PatternType::from);
     if let Some(_) = &pattern_type {
         println!("using test pattern: {:?}", args.test_pattern);
     }
