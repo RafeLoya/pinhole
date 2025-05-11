@@ -13,10 +13,11 @@ use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
-use tokio::time::{sleep, Instant};
+use tokio::time::{Instant, sleep};
 
 /// Max amount of frames that can be buffered
 const FRAME_BUFFER: usize = 30;
+/// Target framerate for rendering
 const FPS: u64 = 30;
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
@@ -93,12 +94,7 @@ impl Client {
         let _ = self.conn_flag_tx.send(true);
 
         // println!("joined session: {}", self.session_id);
-
-        // TODO: how large should buffer be?
-        // EXPERIMENTAL: target FPS * worst consumer lag in seconds
-        // 30 FPS * 3 Seconds = 90
-        // TODO: watch channel? only keeping one frame but latency bounded at one frame
-        // TODO: broadcast channel (ring buffer)? drops oldest frame automatically
+        
         let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
 
         // === TCP SESSION CONTROL ================================================================
@@ -111,11 +107,14 @@ impl Client {
 
             loop {
                 let n = match tcp_rd.read(&mut buf).await {
+                    // connection to SFU terminated
                     Ok(0) => {
                         let _ = ctrl_conn_tx.send(false);
                         break;
                     }
+                    // message received
                     Ok(n) => n,
+                    // read error
                     Err(e) => {
                         eprintln!("[CONTROL] TCP read error: {e}");
                         let _ = ctrl_conn_tx.send(false);
@@ -123,6 +122,7 @@ impl Client {
                     }
                 };
 
+                // actions for received message
                 match &buf[..n] {
                     msg if msg.starts_with(b"CONNECTED") => {
                         let _ = ctrl_peer_tx.send(true);
@@ -136,6 +136,7 @@ impl Client {
         });
 
         // === FRAME RENDERING ====================================================================
+        // Receive incoming frames and render.
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
@@ -148,25 +149,26 @@ impl Client {
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
-                
+
                 let mut next_frame = None;
                 loop {
                     match udp_rend.try_recv(&mut buf) {
+                        // received frame, move on to rendering it
                         Ok(n) => {
                             if let Ok(frame) = renderer.process_datagram(&buf[..n]) {
                                 next_frame = Some(frame);
                             }
                         }
+                        // expected, wait for frame to arrive
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            //eprintln!("UDP receive error: {e}");
                             if next_frame.is_some() {
                                 break;
                             } else {
                                 // sleep for a tiny bit
                                 sleep(Duration::from_millis(1)).await;
                             }
-                            //continue;
                         }
+                        // actual receive error
                         Err(e) => {
                             eprintln!("[RENDER] UDP receive error: {e}");
                             if next_frame.is_some() {
@@ -180,19 +182,21 @@ impl Client {
                 }
                 let _ = renderer.render(&next_frame.unwrap());
 
-
                 let now = Instant::now();
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    eprintln!("[RENDER] Time over by {:?} ms!", (now - next_frame_time).as_millis());
+                    eprintln!(
+                        "[RENDER] Time over by {:?} ms!",
+                        (now - next_frame_time).as_millis()
+                    );
                 }
                 next_frame_time = Instant::now() + frame_interval;
             }
         });
 
         // === FRAME CAPTURE, ENCODING, AND SENDING ===============================================
-        // Receive AsciiFrame, then serialize and send to peer via UDP if present
+        // Receive AsciiFrame, then serialize and send to peer via UDP if present.
         let send_conn_rx = self.conn_flag_rx.clone();
         let mut send_peer_rx = self.peer_flag_rx.clone();
         let udp_send = udp_socket.clone();
@@ -218,9 +222,10 @@ impl Client {
         });
 
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
+        // From either a mock frame generator or the camera,
+        // create the ASCII frames to send to the peer.
         let cfg = VideoConfig::default();
         if let Some(pattern) = &self.test_pattern {
-            // TODO: this is jank, may not be important if we remove patterns in future
             let pattern_val = match pattern {
                 PatternType::Checkerboard => PatternType::Checkerboard,
                 &PatternType::MovingLine => PatternType::MovingLine,
@@ -266,10 +271,12 @@ impl Client {
             }
         }
 
+        // connection stopped, signal to TCP CONTROL and leave
         let _ = tcp_wr.write_all(b"LEAVE\n").await;
         Ok(())
     }
 
+    /// Receive and respond to the initial handshake from the server
     async fn expect_ok(rd: &mut OwnedReadHalf) -> Result<(), Box<dyn Error>> {
         let mut line = Vec::with_capacity(64);
         loop {

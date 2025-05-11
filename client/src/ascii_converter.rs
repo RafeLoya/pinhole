@@ -134,7 +134,7 @@ impl AsciiConverter {
                     let c = self.angle_to_edge(edge_info.angle[e_i], edge_info.magnitude[e_i]);
                     a_frame.set_char(x, y, c);
                 } else {
-                    // No significant edge, retrieve RGB values from
+                    // no significant edge, retrieve RGB values from
                     // scaled pixel destination in image frame and
                     // map by intensity
                     if let Some(rgb) = i_frame.get_pixel(i_x, i_y) {

@@ -2,8 +2,6 @@ use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::io;
 use std::io::Write;
-use tokio::time::Instant;
-// TODO: changing window / frame sizes during runtime
 
 /// Outputs ASCII frame data to `stdout`
 pub struct AsciiRenderer {
@@ -41,8 +39,6 @@ impl AsciiRenderer {
     /// `prev_frame`
     pub fn render(&mut self, frame: &AsciiFrame) -> Result<(), Box<dyn Error>> {
         // did frame size change?
-        let start = Instant::now();
-
         if frame.w != self.prev_w
             || frame.h != self.prev_h
             || self.prev_frame.len() != frame.w * frame.h
@@ -53,8 +49,6 @@ impl AsciiRenderer {
 
             Self::clear_screen()?;
         }
-
-        //print!("\x1B[1;1H{:?}", frame.chars().to_vec());
 
         for y in 0..frame.h {
             for x in 0..frame.w {
@@ -74,12 +68,10 @@ impl AsciiRenderer {
 
         io::stdout().flush()?;
 
-        let end = Instant::now();
-        // eprintln!("time to render: {:?}", end - start);
-
         Ok(())
     }
 
+    /// Deserializes an array of bytes into an `AsciiFrame`, if it is valid
     pub fn process_datagram(&mut self, datagram: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
         if datagram.len() < 16 {
             return Err("frame too small (size header too small)".into());
@@ -94,22 +86,10 @@ impl AsciiRenderer {
         let h = usize::from_be_bytes(h_bytes);
 
         AsciiFrame::from_bytes(w, h, &datagram[16..])
-        
-        // if w * h + 16 > datagram.len() {
-        //     return Err(format!(
-        //         "incomplete frame: expected {} bytes but got {}",
-        //         w * h,
-        //         datagram.len() - 16
-        //     )
-        //     .into());
-        // }
-        // 
-        // // TODO: review this
-        // AsciiFrame::from_bytes(w, h, &datagram[16..16 + w * h])
     }
 
+    /// Serializes an array of bytes into an `AsciiFrame`
     pub fn serialize_frame(frame: &AsciiFrame) -> Vec<u8> {
-        //let mut bytes = Vec::with_capacity(16 + frame.w * frame.h);
         let mut bytes = Vec::with_capacity(16 + frame.w * frame.h * 4);
         bytes.extend_from_slice(&frame.w.to_be_bytes());
         bytes.extend_from_slice(&frame.h.to_be_bytes());

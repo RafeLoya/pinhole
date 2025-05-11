@@ -3,10 +3,13 @@ use std::error::Error;
 
 use crate::image_frame::ImageFrame;
 use std::io::{BufReader, Read};
-use std::process::Child;
+use std::process::{Child, ChildStdout};
 
+/// Amount of bytes used per pixel in the RGB24 color format
 const DEFAULT_BYTES_PER_PIXEL: usize = 3;
 
+/// Spawns FFmpeg as a child process, reads the video frames
+/// and captures it into an `ImageFrame`
 pub struct Camera {
     /// Requested image width
     w: usize,
@@ -16,7 +19,7 @@ pub struct Camera {
     /// to the program
     ffmpeg_proc: Child,
     /// Reader, reads output frames from the FFmpeg child process
-    frame_reader: BufReader<std::process::ChildStdout>,
+    frame_reader: BufReader<ChildStdout>,
     /// Intermediate buffer between FFmpeg child process and ImageFrame data
     frame_buffer: Vec<u8>,
 }
@@ -74,10 +77,6 @@ impl Camera {
         frame.buffer_mut().copy_from_slice(&self.frame_buffer);
 
         Ok(())
-    }
-
-    pub fn dimensions(&self) -> (usize, usize) {
-        (self.w, self.h)
     }
 }
 

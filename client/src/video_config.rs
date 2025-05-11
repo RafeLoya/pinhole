@@ -1,3 +1,5 @@
+/// Shared configuration values used by different systems
+/// in the entire program
 pub struct VideoConfig {
     pub camera_width: usize,
     pub camera_height: usize,

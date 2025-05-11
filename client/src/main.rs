@@ -24,7 +24,6 @@ enum TestPattern {
     MovingLine,
 }
 
-// TODO: this is really jank, probably not important tho if we will remove test patterns in future
 impl From<TestPattern> for PatternType {
     fn from(pattern: TestPattern) -> Self {
         match pattern {
@@ -67,7 +66,6 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    tracing_subscriber::fmt::init();
 
     let session_id = if args.session_id.is_empty() {
         let rand_id: u32 = rand::rng().random();

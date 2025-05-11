@@ -4,8 +4,6 @@ use std::process::{Child, Command, Stdio};
 /// image frames to the program with default arguments
 /// (i.e. no custom arguments passed to `ffmppeg`)
 ///
-/// TODO: greater argument flexibility (alt function)
-///
 /// # Examples
 ///
 /// ```

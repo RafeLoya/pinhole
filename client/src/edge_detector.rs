@@ -2,12 +2,12 @@ use crate::image_frame::ImageFrame;
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 
 // TODO: Look into Robert's Cross operator as potential alternative (if slow performance)
 // TODO: Remove `.unwrap()`s in the future for error recovery
-// TODO: Allow user to influence `threshold` data member
+// TODO: Allow user to influence data members
 
+/// The edge values for a given pixel
 pub struct EdgeInfo {
     /// the strength / intensity of an edge, if it exists
     pub magnitude: Vec<f32>,
@@ -19,6 +19,8 @@ pub struct EdgeInfo {
     pub h: usize,
 }
 
+/// Thread that processes given `ImageFrames` using our edge detection methods
+/// and returns that information to apply it to the final `AsciiFrame`
 pub struct EdgeDetector {
     /// The edge magnitudes and angles of the latest processed `ImageFrame`.
     edge_info: Arc<Mutex<EdgeInfo>>,
@@ -155,6 +157,7 @@ impl EdgeDetector {
         Ok((magnitude, angle))
     }
 
+    /// Retrieve the edge information from the `EdgeDetector`
     pub fn get_edge_info(&self) -> Result<EdgeInfo, Box<dyn Error>> {
         let edge_info = self.edge_info.lock().unwrap();
 
@@ -211,6 +214,7 @@ impl EdgeDetector {
                         -1.0 * intensity[(y + 1) * w + (x - 1)] + // Gx(2,0)
                         1.0 * intensity[(y + 1) * w + (x + 1)]; // Gx(2,2)
 
+                // ditto
                 gy[i] = -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gy(0,0)
                         -2.0 * intensity[(y - 1) * w + x] +       // Gy(0,1)
                         -1.0 * intensity[(y - 1) * w + (x + 1)] + // Gy(0,2)
