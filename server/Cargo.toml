@@ -7,6 +7,7 @@ repository = "https://github.com/csi4321/final-project-group4_s25"
 description = "Server for terminal-based video call service with QUIC relaying"
 
 [dependencies]
+common = { path = "../common" }
 clap = { version = "4.5.9", features = ["derive"] }
 tokio = { version = "1.38.0", features = ["full"] }
 

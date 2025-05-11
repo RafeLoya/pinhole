@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        project: [client, server]
+        project: [client, server, common]
     steps:
     - uses: actions/checkout@v4
 

@@ -5,6 +5,7 @@ FROM rust:slim-bookworm AS builder
 WORKDIR /app
 
 COPY server/ server/
+COPY common/ common/
 COPY cicd/server.Cargo.toml Cargo.toml
 
 RUN cargo build --release --bin server
