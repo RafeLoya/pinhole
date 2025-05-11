@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use common::logger::Logger;
 use tokio::sync::{mpsc, RwLock};
+use std::sync::Arc;
+
 
 pub enum Message {
     AsciiFrame(Vec<u8>),
@@ -137,15 +140,17 @@ struct Inner {
     /// reverse map of client addresses -> session ID
     pub client_sessions: HashMap<SocketAddr, String>,
     pub udp_to_tcp: HashMap<SocketAddr, SocketAddr>,
+    pub logger: Arc<Logger>,
 }
 
 impl SessionManager {
-    pub fn new() -> Self {
+    pub fn new(logger: Arc<Logger>) -> Self {
         Self {
             inner: RwLock::new(Inner {
                 sessions: HashMap::new(),
                 client_sessions: HashMap::new(),
                 udp_to_tcp: HashMap::new(),
+                logger
             }),
         }
     }
@@ -293,9 +298,7 @@ impl SessionManager {
             let s_id = inner.client_sessions.get(&tcp_addr).unwrap().clone();
             inner.sessions.get_mut(&s_id).unwrap().register_udp(tcp_addr, udp_src);
             inner.udp_to_tcp.insert(udp_src, tcp_addr);
-            println!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr);
-        } else {
-            eprintln!("UDP {} could not be matched to any client", udp_src);
+            inner.logger.info(&format!("registered REAL UDP src {} to TCP {}", udp_src, tcp_addr));
         }
     }
 

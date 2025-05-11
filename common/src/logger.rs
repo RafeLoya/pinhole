@@ -211,4 +211,9 @@ impl Logger {
     pub fn fatal(&self, message: &str) -> Result<(), std::io::Error> {
         self.log(LogLevel::Fatal, message)
     }
+
+    // get the current log file
+    pub fn get_log_file(&self) -> String {
+        self.config.log_file.clone()
+    }
 }
