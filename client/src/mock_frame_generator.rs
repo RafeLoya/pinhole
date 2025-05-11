@@ -2,17 +2,26 @@ use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::time::{Duration, Instant};
 
+/// Test patterns for local development
 pub enum PatternType {
     Checkerboard,
     MovingLine,
 }
 
+/// Factory for "fake" frames to test locally.
 pub struct MockFrameGenerator {
+    /// width of mock ASCII frame
     w: usize,
+    /// height of mock ASCII frame
     h: usize,
+    /// counter to determine how ASCII frame should look temporally
+    /// (i.e. when to alter characters)
     frame_counter: usize,
+    /// determine current time
     last_frame_time: Instant,
+    /// how long to wait to create a new frame (effectively FPS)
     frame_delay: Duration,
+    /// pattern to generate
     pattern_type: PatternType,
 }
 
@@ -27,7 +36,7 @@ impl MockFrameGenerator {
             return Err("failed to create mock frame generator".into());
         }
 
-        let frame_delay = Duration::from_micros((1000000.0 / fps as f64) as u64);
+        let frame_delay = Duration::from_millis((1000 / fps) as u64);
 
         Ok(MockFrameGenerator {
             w,
@@ -39,10 +48,11 @@ impl MockFrameGenerator {
         })
     }
 
+    /// Generate a mock frame
     pub fn generate_frame(&mut self) -> Result<AsciiFrame, Box<dyn Error>> {
         let elapsed = self.last_frame_time.elapsed();
         if elapsed < self.frame_delay {
-            //std::thread::sleep(self.frame_delay - elapsed);
+            std::thread::sleep(self.frame_delay - elapsed);
         }
         self.last_frame_time = Instant::now();
 
@@ -58,6 +68,7 @@ impl MockFrameGenerator {
         Ok(frame)
     }
 
+    /// Create a checkerboard pattern in the mock frame
     fn generate_checkerboard(&self, frame: &mut AsciiFrame) {
         let chars = ['.', '#'];
 
@@ -72,6 +83,7 @@ impl MockFrameGenerator {
         }
     }
 
+    /// Create a moving line pattern in the mock frame
     fn generate_moving_line(&self, frame: &mut AsciiFrame) {
         let line_pos = self.frame_counter % frame.h;
 
