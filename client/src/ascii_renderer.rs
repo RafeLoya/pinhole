@@ -1,9 +1,7 @@
+use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::io;
 use std::io::Write;
-use common::ascii_frame::AsciiFrame;
-
-// TODO: changing window / frame sizes during runtime
 
 /// Outputs ASCII frame data to `stdout`
 pub struct AsciiRenderer {
@@ -43,8 +41,8 @@ impl AsciiRenderer {
         // did frame size change?
         if frame.w != self.prev_w
             || frame.h != self.prev_h
-            || self.prev_frame.len() != frame.w * frame.h {
-
+            || self.prev_frame.len() != frame.w * frame.h
+        {
             self.prev_frame = vec![' '; frame.w * frame.h];
             self.prev_w = frame.w;
             self.prev_h = frame.h;
@@ -58,11 +56,11 @@ impl AsciiRenderer {
 
                 if i < frame.chars().len()
                     && i < self.prev_frame.len()
-                    && frame.chars()[i] != self.prev_frame[i] {
-
+                    && frame.chars()[i] != self.prev_frame[i]
+                {
                     // ANSI escape code sequence, move cursor to specified
                     // row & column & change character
-                    print!("\x1B[{};{}H{}", y+1, x+1, frame.chars()[i]);
+                    print!("\x1B[{};{}H{}", y + 1, x + 1, frame.chars()[i]);
                     self.prev_frame[i] = frame.chars()[i];
                 }
             }
@@ -71,5 +69,32 @@ impl AsciiRenderer {
         io::stdout().flush()?;
 
         Ok(())
+    }
+
+    /// Deserializes an array of bytes into an `AsciiFrame`, if it is valid
+    pub fn process_datagram(&mut self, datagram: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
+        if datagram.len() < 16 {
+            return Err("frame too small (size header too small)".into());
+        }
+
+        let mut w_bytes = [0u8; 8];
+        w_bytes.copy_from_slice(&datagram[0..8]);
+        let w = usize::from_be_bytes(w_bytes);
+
+        let mut h_bytes = [0u8; 8];
+        h_bytes.copy_from_slice(&datagram[8..16]);
+        let h = usize::from_be_bytes(h_bytes);
+
+        AsciiFrame::from_bytes(w, h, &datagram[16..])
+    }
+
+    /// Serializes an array of bytes into an `AsciiFrame`
+    pub fn serialize_frame(frame: &AsciiFrame) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(16 + frame.w * frame.h * 4);
+        bytes.extend_from_slice(&frame.w.to_be_bytes());
+        bytes.extend_from_slice(&frame.h.to_be_bytes());
+        bytes.extend_from_slice(&frame.bytes());
+
+        bytes
     }
 }

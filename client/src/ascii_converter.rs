@@ -1,11 +1,11 @@
-use std::error::Error;
-use common::ascii_frame::AsciiFrame;
 use crate::edge_detector::EdgeDetector;
 use crate::image_frame::ImageFrame;
+use common::ascii_frame::AsciiFrame;
+use std::error::Error;
 
 /// The coefficients below are derived from Rec. ITU-R BT.601-7.
 /// In the specification, these luminance coefficients represent
-/// how much they influence / contribute to the human eye's 
+/// how much they influence / contribute to the human eye's
 /// perception of brightness.
 
 pub const R_LUMINANCE: f32 = 0.2989;
@@ -21,7 +21,7 @@ pub struct AsciiConverter {
     /// Characters for horizontal edges in `AsciiFrame` representation
     ///
     /// NOTE: 'horizontal' is in reference to the gradient direction, not
-    /// their angle in the original / ASCII image, so these will actually 
+    /// their angle in the original / ASCII image, so these will actually
     /// be vertical characters in the final output (i.e. "|│┃")
     ascii_horizontal: Vec<char>,
     /// Characters for vertical edges in `AsciiFrame` representation
@@ -63,9 +63,8 @@ impl AsciiConverter {
         h: usize,
         edge_threshold: f32,
         contrast: f32,
-        brightness: f32
-    ) -> Result<Self,  Box<dyn Error>> {
-
+        brightness: f32,
+    ) -> Result<Self, Box<dyn Error>> {
         let edge_detector = EdgeDetector::new(w, h, edge_threshold);
 
         edge_detector.start(w, h)?;
@@ -79,11 +78,11 @@ impl AsciiConverter {
             ascii_back,
             edge_threshold,
             contrast,
-            brightness
+            brightness,
         })
     }
 
-    pub fn default() -> Result<Self,  Box<dyn Error>> {
+    pub fn default() -> Result<Self, Box<dyn Error>> {
         Self::new(
             Self::DEFAULT_ASCII_INTENSITY.chars().collect(),
             Self::DEFAULT_ASCII_HORIZONTAL.chars().collect(),
@@ -99,18 +98,22 @@ impl AsciiConverter {
     }
 
     /// Convert an `ImageFrame` to an ASCII art representation with edges
-    /// - Strong edges (based on `edge_threshold`) are represented with 
+    /// - Strong edges (based on `edge_threshold`) are represented with
     ///   separate characters to reflect the angle of an edge
     /// - All other regions are represented with intensity-based (grayscale)
     ///   ASCII characters
     ///
     /// The function also handles scaling from the original `ImageFrame`'s
     /// dimensions to the target `AsciiFrame`'s dimensions
-    pub fn convert(&self, i_frame: &ImageFrame, a_frame: &mut AsciiFrame) -> Result<(), Box<dyn Error>> {
+    pub fn convert(
+        &self,
+        i_frame: &ImageFrame,
+        a_frame: &mut AsciiFrame,
+    ) -> Result<(), Box<dyn Error>> {
         // submit the original image to the edge detector
         self.edge_detector.submit_frame(i_frame)?;
 
-        // scaling factors to map the ASCII frame's dimension 
+        // scaling factors to map the ASCII frame's dimension
         // to the original image's dimension
         let scale_x = i_frame.w as f32 / a_frame.w as f32;
         let scale_y = i_frame.h as f32 / a_frame.h as f32;
@@ -118,23 +121,20 @@ impl AsciiConverter {
         // retrieve processed edge info
         let edge_info = self.edge_detector.get_edge_info()?;
 
-        for y in  0..a_frame.h {
-            for x in  0..a_frame.w {
+        for y in 0..a_frame.h {
+            for x in 0..a_frame.w {
                 let i_x = (x as f32 * scale_x) as usize;
                 let i_y = (y as f32 * scale_y) as usize;
-                let e_i = i_y.min(edge_info.h - 1)
-                    * edge_info.w
-                    + i_x.min(edge_info.w - 1);
+                let e_i = i_y.min(edge_info.h - 1) * edge_info.w + i_x.min(edge_info.w - 1);
 
                 // if an edge's magnitude is greater than the threshold,
                 // assign edge character instead of regular character
-                if e_i < edge_info.magnitude.len()
-                    && edge_info.magnitude[e_i] > self.edge_threshold {
-
+                if e_i < edge_info.magnitude.len() && edge_info.magnitude[e_i] > self.edge_threshold
+                {
                     let c = self.angle_to_edge(edge_info.angle[e_i], edge_info.magnitude[e_i]);
                     a_frame.set_char(x, y, c);
                 } else {
-                    // No significant edge, retrieve RGB values from
+                    // no significant edge, retrieve RGB values from
                     // scaled pixel destination in image frame and
                     // map by intensity
                     if let Some(rgb) = i_frame.get_pixel(i_x, i_y) {
@@ -142,7 +142,8 @@ impl AsciiConverter {
                         let rgb_adj = self.adjust_pixel(rgb);
                         let intensity = ImageFrame::calculate_intensity_u8(rgb_adj);
 
-                        let char_i = (intensity as f32 / 255.0 * self.ascii_intensity.len() as f32) as usize;
+                        let char_i =
+                            (intensity as f32 / 255.0 * self.ascii_intensity.len() as f32) as usize;
                         // bounds check (e.g. floating point rounding error)
                         let char_i = char_i.min(self.ascii_intensity.len() - 1);
 
@@ -176,11 +177,10 @@ impl AsciiConverter {
     /// angle character based on magnitude and angle degree
     fn angle_to_edge(&self, angle: f32, magnitude: f32) -> char {
         // normalizing to 0-180
-        let angle_d = ((angle.to_degrees() % 180.0) + 180.0) %  180.0;
+        let angle_d = ((angle.to_degrees() % 180.0) + 180.0) % 180.0;
 
-        let char_i = ((magnitude / 255.0)
-            * (self.ascii_horizontal.len() as f32)).min(
-            (self.ascii_horizontal.len() - 1) as f32) as usize;
+        let char_i = ((magnitude / 255.0) * (self.ascii_horizontal.len() as f32))
+            .min((self.ascii_horizontal.len() - 1) as f32) as usize;
 
         if (angle_d >= 0.0 && angle_d < 22.5) || (angle_d >= 157.5 && angle_d < 180.0) {
             self.ascii_horizontal[char_i.min(self.ascii_horizontal.len() - 1)]

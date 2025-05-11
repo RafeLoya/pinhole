@@ -1,3 +1,5 @@
+/// Shared configuration values used by different systems
+/// in the entire program
 pub struct VideoConfig {
     pub camera_width: usize,
     pub camera_height: usize,
@@ -15,7 +17,7 @@ impl VideoConfig {
             camera_height: 480,
             ascii_width: 120,
             ascii_height: 40,
-            edge_threshold: 20.0,  // Use a single consistent default
+            edge_threshold: 127.50,
             contrast: 1.5,
             brightness: 0.0,
         }
@@ -30,7 +32,6 @@ impl VideoConfig {
         contrast: f32,
         brightness: f32,
     ) -> Self {
-
         Self {
             camera_width,
             camera_height,

@@ -1,89 +1,94 @@
 extern crate alloc;
 
-mod ffmpeg;
-mod camera;
-mod ascii_renderer;
-mod image_frame;
 mod ascii_converter;
-mod edge_detector;
-mod video_config;
+mod ascii_renderer;
+mod camera;
 mod client;
+mod edge_detector;
+mod ffmpeg;
+mod image_frame;
+mod mock_frame_generator;
+mod video_config;
 
-use std::net::SocketAddr;
-use crate::ascii_converter::AsciiConverter;
-use common::ascii_frame::AsciiFrame;
-use crate::ascii_renderer::AsciiRenderer;
-use crate::camera::Camera;
-use crate::image_frame::ImageFrame;
-
-use crate::video_config::VideoConfig;
-use std::time::Duration;
-use std::thread;
 use crate::client::Client;
+use crate::mock_frame_generator::PatternType;
+use clap::{Parser, ValueEnum};
+use rand::Rng;
+use std::error::Error;
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum TestPattern {
+    /// Checkerboard pattern
+    Checkerboard,
+    /// Horizontal line moving from top to bottom
+    MovingLine,
+}
+
+impl From<TestPattern> for PatternType {
+    fn from(pattern: TestPattern) -> Self {
+        match pattern {
+            TestPattern::Checkerboard => PatternType::Checkerboard,
+            TestPattern::MovingLine => PatternType::MovingLine,
+        }
+    }
+}
+
+/// if wanting to test locally, the command would look something like this:
+///
+/// ```bash
+/// cargo run --bin client -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
+/// ```
+///
+/// where:
+/// - TCP_PORT and UDP_PORT is port of your choosing on 127.0.0.1
+/// - SESSION_ID can be any string (for now)
+/// - PATTERN_TYPE can be either "checkerboard" or "moving-line"
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// TCP server bind address
+    #[arg(short = 't', long, default_value = "127.0.0.1:8080")]
+    tcp_addr: String,
+
+    /// UDP server bind address
+    #[arg(short = 'u', long, default_value = "127.0.0.1:4433")]
+    udp_addr: String,
+
+    /// Session ID to join (random if not given)
+    #[arg(short = 's', long, default_value = "")]
+    session_id: String,
+
+    /// Test pattern (if not using a camera)
+    #[arg(short = 'p', long)]
+    test_pattern: Option<TestPattern>,
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // let mut config = VideoConfig::new(
-    //     640,
-    //     480,
-    //     120,
-    //     40,
-    //     127.50,
-    //     1.5,
-    //     0.0
-    // );
-    //
-    // let mut camera = Camera::new(config.camera_width, config.camera_height)?;
-    //
-    // let mut image_frame = ImageFrame::new(config.camera_width, config.camera_height, 3)?;
-    // let mut ascii_frame = AsciiFrame::new(config.ascii_width, config.ascii_height, ' ')?;
-    //
-    // let converter = AsciiConverter::new(
-    //     AsciiConverter::DEFAULT_ASCII_INTENSITY.chars().collect(),
-    //     AsciiConverter::DEFAULT_ASCII_HORIZONTAL.chars().collect(),
-    //     AsciiConverter::DEFAULT_ASCII_VERTICAL.chars().collect(),
-    //     AsciiConverter::DEFAULT_ASCII_FORWARD.chars().collect(),
-    //     AsciiConverter::DEFAULT_ASCII_BACK.chars().collect(),
-    //     config.camera_width,
-    //     config.camera_height,
-    //     config.edge_threshold,
-    //     config.contrast,
-    //     config.brightness
-    // )?;
-    //
-    // let mut renderer = AsciiRenderer::new()?;
-    //
-    // loop {
-    //     if let Err(e) = camera.capture_frame(&mut image_frame) {
-    //         eprintln!("failed while capturing frame: {}", e);
-    //         break;
-    //     }
-    //
-    //     if let Err(e) = converter.convert(&image_frame, &mut ascii_frame) {
-    //         eprintln!("failed while converting frame: {}", e);
-    //         break;
-    //     }
-    //
-    //     if let Err(e) = renderer.render(&ascii_frame) {
-    //         eprintln!("failed while rendering frame: {}", e);
-    //         break;
-    //     }
-    //
-    //     thread::sleep(Duration::from_millis(10));
-    // }
+async fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
 
-    tracing_subscriber::fmt::init();
+    let session_id = if args.session_id.is_empty() {
+        let rand_id: u32 = rand::rng().random();
+        format!("session-{}", rand_id)
+    } else {
+        args.session_id.clone()
+    };
 
-    let mut client = Client::new()?;
+    println!("connection to session: {}", session_id);
 
-    let server_addr = "[::1]:4433".parse::<SocketAddr>()?;
-    client.connect(server_addr, "localhost").await?;
+    let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
+    if let Some(_) = &pattern_type {
+        println!("using test pattern: {:?}", args.test_pattern);
+    }
 
-    let response = client.send_message(b"hello from client!").await?;
-    println!("response: {:?}", std::str::from_utf8(&response)?);
+    let client = Client::new(
+        args.tcp_addr,
+        args.udp_addr,
+        session_id.clone(),
+        pattern_type,
+    );
 
-    client.close();
-    client.wait_idle().await;
+    client.run().await?;
 
     Ok(())
 }

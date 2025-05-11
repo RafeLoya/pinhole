@@ -24,6 +24,9 @@ help: ## Help function
 	@echo ""
 	@echo "Connectivity Testing:"
 	@grep -E '^\S+: .*## \[Test\]' $(MAKEFILE_LIST) | sed 's/: .*## \[Test\] /\t/' | expand -t 30
+	@echo ""
+	@echo "GCP:"
+	@grep -E '^\S+: .*## \[GCP\]' $(MAKEFILE_LIST) | sed 's/: .*## \[GCP\] /\t/' | expand -t 30
 .PHONY: help
 
 #
@@ -91,11 +94,17 @@ enter-prod:
 	docker exec -it ${CONTAINER_PROD} bash
 
 .PHONY: view-stdout-prod, view-logs-prod, test-dev, test-prod
-view-stdout-prod:
+view-stdout-prod: ## [GCP] View server stdout from production VM
 	docker logs ${CONTAINER_PROD} -f
 
-view-logs-prod:
+view-logs-prod: ## [GCP] View server debug files live from production VM
 	docker exec -it ${CONTAINER_PROD} tail -f debug.log
+
+tshark-prod: ## [GCP] View wireshark logs from production VM
+tshark-prod: ## [GCP]   Note: run inside the VM but not inside the container.
+tshark-prod: ## [GCP]   there is a tshark-command.sh script in the home directory with this command.
+	sudo tshark -i any -Y 'ip.addr == 127.0.0.1'
+.PHONY: tshark-prod
 
 test-dev:
 	CONTAINER_NAME=${CONTAINER_DEV} bash -c scripts/test-suite.sh

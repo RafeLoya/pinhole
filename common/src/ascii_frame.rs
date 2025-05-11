@@ -1,10 +1,12 @@
 use std::error::Error;
+use std::str::from_utf8;
 
 const DEFAULT_W: usize = 120;
 const DEFAULT_H: usize = 40;
 
 /// ASCII representation of an `ImageFrame` after contrast, brightness,
 /// and luminance transformations
+#[derive(Clone)]
 pub struct AsciiFrame {
     /// The amount of columns in the frame
     pub w: usize,
@@ -27,6 +29,33 @@ impl AsciiFrame {
         })
     }
 
+    /// Extract an `AsciiFrame` from an array of bytes
+    pub fn from_bytes(w: usize, h: usize, bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        if w == 0 || h == 0 {
+            return Err("dimensions must be greater than zero".into());
+        }
+
+        // validate UTF-8
+        let text = from_utf8(bytes)?;
+        let total = w * h;
+        let mut chars_itr = text.chars();
+        let mut grid = Vec::with_capacity(total);
+
+        // pull EXACTLY w * h code-points, else truncation
+        for _ in 0..total {
+            grid.push(chars_itr.next().ok_or("frame truncation")?);
+        }
+
+        // any bytes after expected image?
+        // reject -> sender / receiver size mismatch
+        if chars_itr.next().is_some() {
+            return Err("Extra data after frame".into());
+        }
+
+        Ok(Self { w, h, chars: grid })
+    }
+
+    /// Set individual characters, with bounds check
     pub fn set_char(&mut self, x: usize, y: usize, c: char) -> bool {
         if x >= self.w || y >= self.h {
             return false;
@@ -41,7 +70,37 @@ impl AsciiFrame {
         }
     }
 
+    /// Set range of characters, with bounds check
+    pub fn set_chars(&mut self, data: &[char]) -> bool {
+        if data.len() > self.chars.len() {
+            return false;
+        }
+
+        self.chars[0..data.len()].copy_from_slice(data);
+        true
+    }
+
+    /// Return raw `AsciiFrame` data
     pub fn chars(&self) -> &[char] {
         &self.chars
+    }
+
+    /// Return raw, mutable `AsciiFrame` data
+    pub fn chars_mut(&mut self) -> &mut [char] {
+        &mut self.chars
+    }
+
+    /// Encode a frame into variable-width UTF-8
+    pub fn bytes(&self) -> Vec<u8> {
+        // worst case scenario - EVERY character uses all 4 code points
+        let mut out = Vec::with_capacity(self.chars().len() * 4);
+
+        for &c in &self.chars {
+            let mut buf = [0u8; 4];
+            let n = c.encode_utf8(&mut buf).len();
+            out.extend_from_slice(&buf[..n]);
+        }
+
+        out
     }
 }

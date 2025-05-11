@@ -1,25 +1,28 @@
+use bcrypt;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
-use serde::{Serialize, Deserialize};
+use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::ascii_frame::AsciiFrame;
 
 pub type UserId = String;
+pub type UserInfo = String;
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NetFrame {
+pub struct VideoFrame {
     /// Width of frame
     pub w: usize,
     /// Height of frame
     pub h: usize,
-    /// Data (characters representing 'pixels' of frame)
-    pub data: Vec<char>,
     /// For latency calculation
     pub timestamp: u64,
+    /// Data (characters representing 'pixels' of frame)
+    pub data: Vec<char>,
 }
 
-impl NetFrame {
-    pub fn from_ascii_frame(frame: &AsciiFrame) -> NetFrame {
+impl VideoFrame {
+    pub fn from_ascii_frame(frame: &AsciiFrame) -> VideoFrame {
         let now = Instant::now();
         Self {
             w: frame.w,
@@ -28,10 +31,10 @@ impl NetFrame {
             timestamp: now.elapsed().as_micros() as u64,
         }
     }
-    
+
     pub fn to_ascii_frame(&self) -> Result<AsciiFrame, Box<dyn Error>> {
         let mut frame = AsciiFrame::new(self.w, self.h, ' ')?;
-        
+
         for y in 0..self.h {
             for x in 0..self.w {
                 let i = y * self.w + x;
@@ -40,28 +43,26 @@ impl NetFrame {
                 }
             }
         }
-        
+
         Ok(frame)
     }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub enum MessageType {
-    
-}
+pub enum MessageType {}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct UserInfo {
-    pub id: UserId,
+pub struct User {
     pub username: String,
+    pub address: SocketAddr,
     pub status: UserStatus,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug,  PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum UserStatus {
     Online,
     InCall,
-    Offline
+    Offline,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

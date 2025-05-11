@@ -1,12 +1,15 @@
-use std::error::Error;
 use crate::ffmpeg;
+use std::error::Error;
 
-use std::io::{BufReader, Read};
-use std::process::Child;
 use crate::image_frame::ImageFrame;
+use std::io::{BufReader, Read};
+use std::process::{Child, ChildStdout};
 
+/// Amount of bytes used per pixel in the RGB24 color format
 const DEFAULT_BYTES_PER_PIXEL: usize = 3;
 
+/// Spawns FFmpeg as a child process, reads the video frames
+/// and captures it into an `ImageFrame`
 pub struct Camera {
     /// Requested image width
     w: usize,
@@ -16,9 +19,9 @@ pub struct Camera {
     /// to the program
     ffmpeg_proc: Child,
     /// Reader, reads output frames from the FFmpeg child process
-    frame_reader: BufReader<std::process::ChildStdout>,
+    frame_reader: BufReader<ChildStdout>,
     /// Intermediate buffer between FFmpeg child process and ImageFrame data
-    frame_buffer: Vec<u8>
+    frame_buffer: Vec<u8>,
 }
 
 impl Camera {
@@ -42,7 +45,7 @@ impl Camera {
             h,
             ffmpeg_proc,
             frame_reader: BufReader::with_capacity(buffer_size, stdout),
-            frame_buffer: vec![0u8; buffer_size]
+            frame_buffer: vec![0u8; buffer_size],
         })
     }
 
@@ -52,7 +55,8 @@ impl Camera {
             return Err(format!(
                 "frame dimensions ({}x{}) do not match camera dimensions ({}x{})",
                 frame.w, frame.h, self.w, self.h
-            ).into());
+            )
+            .into());
         }
 
         // read in the frame
@@ -63,18 +67,16 @@ impl Camera {
         if self.frame_buffer.len() != frame.buffer().len() {
             return Err(format!(
                 "buffer size not consistent between camera ({}) and frame ({})",
-                self.frame_buffer.len(), frame.buffer().len()
-            ).into());
+                self.frame_buffer.len(),
+                frame.buffer().len()
+            )
+            .into());
         }
 
         // copy the frame into the provided ImageFrame
         frame.buffer_mut().copy_from_slice(&self.frame_buffer);
 
         Ok(())
-    }
-
-    pub fn dimensions(&self) -> (usize, usize) {
-        (self.w, self.h)
     }
 }
 
