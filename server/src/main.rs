@@ -1,4 +1,5 @@
 use std::{net::SocketAddr, sync::Arc};
+use clap::{ArgAction, Parser};
 use tokio::{
     io::{AsyncWriteExt, Interest},
     net::{TcpListener, TcpStream},
@@ -8,15 +9,43 @@ use tokio::{
 pub const HELLO_BYTE: u8 = 0x69;
 const CONNECTION_REQUEST_BYTE: u8 = 0x42;
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// TCP server bind address
+    #[arg(short, long, default_value = "0.0.0.0:8080")]
+    tcp_addr: String,
+
+    /// UDP server bind address
+    #[arg(short, long, default_value = "0.0.0.0:4433")]
+    udp_addr: String,
+
+    /// Log file path
+    #[arg(short, long, default_value = "debug.log")]
+    log_file: String,
+
+    /// Enable verbose output
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    verbose: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let tcp_addr = "0.0.0.0:8080";
-    let tcp_listener = TcpListener::bind(tcp_addr).await?;
+
+    let args = Args::parse();
+    if args.verbose {
+        println!("Verbose mode enabled");
+        println!(" - Log file: {}", args.log_file);
+    }
+    
+
+    let tcp_addr = args.tcp_addr;
+    let tcp_listener = TcpListener::bind(tcp_addr.clone()).await?;
 
     println!("TCP Server listening on {}", tcp_addr);
 
-    let udp_addr = "0.0.0.0:4433";
-    let udp_listener = tokio::net::UdpSocket::bind(udp_addr).await?;
+    let udp_addr = args.udp_addr;
+    let udp_listener = tokio::net::UdpSocket::bind(udp_addr.clone()).await?;
 
     println!("UDP Server listening on {}", udp_addr);
 
