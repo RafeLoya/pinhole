@@ -109,7 +109,7 @@ The core of your project should, ideally, be written in Rust. Depending on the p
     - Assisting with learning new concepts / topics
     - Exploring alternative methods of implementing certain program functionality
     - Debugging subtle errors in the program's logic or code
-    - Sparingly, and after careful review and / or modification, code snippets were used directly
+    - Sparingly, and after careful review and / or modification, generated code snippets were utilized
   - Both of these tools had significant drawbacks:
     - For both, they often struggled to understand the program or give meaningful feedback
       - This may be due to poor prompting on our part
