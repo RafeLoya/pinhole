@@ -1,5 +1,3 @@
-extern crate alloc;
-
 mod ascii_converter;
 mod ascii_renderer;
 mod camera;
@@ -13,10 +11,9 @@ mod video_config;
 use crate::client::Client;
 use crate::mock_frame_generator::PatternType;
 use clap::{Parser, ValueEnum};
-use rand::Rng;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::collections::HashMap;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
@@ -70,6 +67,8 @@ struct Args {
     keyfile: Option<String>,
 }
 
+/// Reads server information and a session ID from a given file,
+/// if it exists.
 fn parse_keyfile(path: &str) -> Result<HashMap<String, String>, Box<dyn Error>> {
     let content = fs::read_to_string(path)?;
     let mut map = HashMap::new();

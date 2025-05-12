@@ -218,23 +218,23 @@ impl SessionManager {
 
     pub async fn remove_client(&self, tcp: &SocketAddr) {
         let mut inner = self.inner.write().await;
-        
+
         let session_id = match inner.client_sessions.remove(tcp) {
             Some(id) => id,
             None => return,
         };
-        
+
         let session = match inner.sessions.get_mut(&session_id) {
             Some(session) => session,
             None => return,
         };
-        
+
         let is_empty_after_remove = {
             session.remove_client(tcp);
             session.connected_notified = false;
             session.is_empty()
         };
-        
+
         inner.udp_to_tcp.retain(|_, mapped_tcp| {
             let keep = mapped_tcp != tcp;
             if !keep {
@@ -242,7 +242,7 @@ impl SessionManager {
             }
             keep
         });
-        
+
         if is_empty_after_remove {
             inner.sessions.remove(&session_id);
             println!("[CONTROL] removed empty session {}", session_id);
