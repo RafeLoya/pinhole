@@ -130,7 +130,7 @@ impl EdgeDetector {
         Ok(())
     }
 
-    /// Using the Sobel operator, processes an image frame fo edge detection
+    /// Using the Sobel operator, processes an image frame for edge detection
     /// after retrieving the grayscale intensity map
     fn process_frame(
         frame: &ImageFrame,
