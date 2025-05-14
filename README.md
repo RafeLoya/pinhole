@@ -23,6 +23,8 @@ The client binary directly uses the FFmpeg CLI, which can be downloaded from the
 
 # Installation
 
+Currently, only MacOS is supported, with Windows and Linux support on the horizon.
+
 ## Building From Source
 
 After cloning the repository, build with `cargo` with a release flag and use the executable(s) as you see fit:
