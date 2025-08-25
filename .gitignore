@@ -23,3 +23,8 @@ Cargo.lock
 
 # We can track this if it allows for reproducible builds and run configs
 .idea/
+
+# macOS shenanigans
+.DS_Store
+.DS_Store?
+._*
