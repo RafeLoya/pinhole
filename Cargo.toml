@@ -5,5 +5,5 @@ members = ["server", "client", "common"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-authors = ["Group 4"]
-repository = "https://github.com/csi4321/final-project-group4_s25"
+authors = ["Pinhole Team"]
+repository = "https://github.com/RafeLoya/pinhole"

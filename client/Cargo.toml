@@ -2,9 +2,9 @@
 name = "client"
 version = "0.1.0"
 edition = "2024"
-authors = ["Group 4"]
-repository = "https://github.com/csi4321/final-project-group4_s25"
-description = "Client for terminal-based video call service with ASCII streaming"
+authors = ["Pinhole Team"]
+repository = "https://github.com/RafeLoya/pinhole"
+description = "Client for terminal-based video call service"
 
 [dependencies]
 common = { path = "../common" }
@@ -12,7 +12,6 @@ common = { path = "../common" }
 tokio = { version = "1.40", features = ["full"] }
 clap = { version = "4.5.37", features = ["derive"] }
 rand = "0.9.1"
-tracing-subscriber = "0.3.19"
 
 [[bin]]
 name = "client"

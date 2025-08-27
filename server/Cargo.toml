@@ -2,9 +2,9 @@
 name = "server"
 version = "0.1.0"
 edition = "2024"
-authors = ["Group 4"]
-repository = "https://github.com/csi4321/final-project-group4_s25"
-description = "Server for terminal-based video call service with QUIC relaying"
+authors = ["Pinhole team"]
+repository = "https://github.com/RafeLoya/pinhole"
+description = "SFU Server for terminal-based video call system."
 
 [dependencies]
 common = { path = "../common" }
