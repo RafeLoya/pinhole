@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "pinhole"
 version = "0.1.0"
 edition = "2024"
 authors = ["Pinhole Team"]
@@ -14,4 +14,5 @@ clap = { version = "4.5.37", features = ["derive"] }
 rand = "0.9.1"
 
 [[bin]]
-name = "client"
+name = "pinhole"
+path = "src/main.rs"
