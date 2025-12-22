@@ -36,7 +36,7 @@ impl From<TestPattern> for PatternType {
 /// if wanting to test locally, the command would look something like this:
 ///
 /// ```bash
-/// cargo run --bin client -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
+/// cargo run --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
 /// ```
 ///
 /// where:

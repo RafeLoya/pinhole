@@ -23,7 +23,7 @@ The client binary directly uses the FFmpeg CLI, which can be downloaded from the
 
 # Installation
 
-Currently, only MacOS is supported, with Windows and Linux support on the horizon.
+Currently, only macOS is supported, with Windows and Linux support on the horizon.
 
 ## Building From Source
 
