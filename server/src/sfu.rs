@@ -96,7 +96,6 @@ impl SFU {
                     let line: &str = match msg {
                         Message::Connect(_) => "CONNECTED\n",
                         Message::Disconnect => "DISCONNECTED\n",
-                        _ => continue
                     };
                     println!("[CONTROL] Sending to {}: {}", addr, line.trim());
                     wr.write_all(line.as_bytes()).await?;
@@ -113,7 +112,7 @@ impl SFU {
                         Some("JOIN") => {
                             if let Some(id) = parts.next() {
                                 sessions.ensure_session(id).await;
-                                if sessions.add_client(id.clone(), addr, peer_tx.clone()).await {
+                                if sessions.add_client(id, addr, peer_tx.clone()).await {
                                     println!("[CONTROL] Sending to {}: OK: joined session", addr);
                                     wr.write_all(b"OK: joined session\n").await?;
                                 } else {
