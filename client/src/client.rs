@@ -1,6 +1,7 @@
 use crate::ascii_converter::AsciiConverter;
 use crate::ascii_renderer::AsciiRenderer;
 use crate::camera::Camera;
+use crate::config::PinholeConfig;
 use crate::image_frame::ImageFrame;
 use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
 use crate::video_config::VideoConfig;
@@ -40,6 +41,8 @@ pub struct Client {
     peer_flag_rx: watch::Receiver<bool>,
     /// Optionally, pattern can be used instead of camera
     test_pattern: Option<PatternType>,
+    /// Configuration
+    config: PinholeConfig,
 }
 
 impl Client {
@@ -48,6 +51,7 @@ impl Client {
         server_udp_addr: String,
         session_id: String,
         test_pattern: Option<PatternType>,
+        config: PinholeConfig,
     ) -> Self {
         let (conn_flag_tx, conn_flag_rx) = watch::channel(false);
         let (peer_flag_tx, peer_flag_rx) = watch::channel(false);
@@ -61,6 +65,7 @@ impl Client {
             peer_flag_tx,
             peer_flag_rx,
             test_pattern,
+            config,
         }
     }
 
@@ -140,7 +145,7 @@ impl Client {
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
-        let frame_interval = Duration::from_millis((1000 / FPS));
+        let frame_interval = Duration::from_millis(1000 / FPS);
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
@@ -224,7 +229,7 @@ impl Client {
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
         // From either a mock frame generator or the camera,
         // create the ASCII frames to send to the peer.
-        let cfg = VideoConfig::default();
+        let cfg = VideoConfig::from_pinhole_config(&self.config);
         if let Some(pattern) = &self.test_pattern {
             let pattern_val = match pattern {
                 PatternType::Checkerboard => PatternType::Checkerboard,
@@ -241,17 +246,17 @@ impl Client {
                 }
             }
         } else {
-            let mut camera = Camera::new(cfg.camera_width, cfg.camera_height)?;
+            let mut camera = Camera::from_config(&self.config)?;
 
             let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
             let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
 
             let converter = AsciiConverter::new(
-                AsciiConverter::DEFAULT_ASCII_INTENSITY.chars().collect(),
-                AsciiConverter::DEFAULT_ASCII_HORIZONTAL.chars().collect(),
-                AsciiConverter::DEFAULT_ASCII_VERTICAL.chars().collect(),
-                AsciiConverter::DEFAULT_ASCII_FORWARD.chars().collect(),
-                AsciiConverter::DEFAULT_ASCII_BACK.chars().collect(),
+                self.config.ascii.chars.intensity.chars().collect(),
+                self.config.ascii.chars.horizontal.chars().collect(),
+                self.config.ascii.chars.vertical.chars().collect(),
+                self.config.ascii.chars.forward.chars().collect(),
+                self.config.ascii.chars.back.chars().collect(),
                 cfg.camera_width,
                 cfg.camera_height,
                 cfg.edge_threshold,
@@ -274,6 +279,96 @@ impl Client {
         // connection stopped, signal to TCP CONTROL and leave
         let _ = tcp_wr.write_all(b"LEAVE\n").await;
         Ok(())
+    }
+
+    /// Run in solo mode - local preview without network connection
+    /// This allows testing webcam/screen/file capture and ASCII rendering
+    /// without needing a server or peer
+    pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
+        let cfg = VideoConfig::from_pinhole_config(&self.config);
+
+        if let Some(pattern) = &self.test_pattern {
+            // Mock pattern mode
+            let pattern_val = match pattern {
+                PatternType::Checkerboard => PatternType::Checkerboard,
+                PatternType::MovingLine => PatternType::MovingLine,
+            };
+
+            let mut frame_gen =
+                MockFrameGenerator::new(cfg.ascii_width, cfg.ascii_height, 30, pattern_val)?;
+
+            let mut renderer = AsciiRenderer::new()?;
+
+            println!("Generating test pattern...");
+
+            // Proper frame timing
+            let frame_interval = Duration::from_millis(1000 / 30);
+            let mut next_frame_time = Instant::now() + frame_interval;
+
+            loop {
+                let frame = frame_gen.generate_frame()?;
+                renderer.render(&frame)?;
+
+                // Only sleep if we finished early
+                let now = Instant::now();
+                if next_frame_time > now {
+                    sleep(next_frame_time - now).await;
+                }
+                next_frame_time += frame_interval;
+            }
+        } else {
+            // Camera/screen/file mode
+            let mut camera = Camera::from_config(&self.config)?;
+
+            // Enable frame-dropping mode to prevent buffering lag
+            camera.enable_frame_dropping()?;
+            println!("Frame-dropping mode enabled (always renders latest frame)");
+
+            let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
+            let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+
+            let converter = AsciiConverter::new(
+                self.config.ascii.chars.intensity.chars().collect(),
+                self.config.ascii.chars.horizontal.chars().collect(),
+                self.config.ascii.chars.vertical.chars().collect(),
+                self.config.ascii.chars.forward.chars().collect(),
+                self.config.ascii.chars.back.chars().collect(),
+                cfg.camera_width,
+                cfg.camera_height,
+                cfg.edge_threshold,
+                cfg.contrast,
+                cfg.brightness,
+            )?;
+
+            let mut renderer = AsciiRenderer::new()?;
+
+            println!("Capturing from {}...", self.config.video.source.r#type);
+
+            // Proper frame timing to maintain target FPS
+            let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
+            let mut next_frame_time = Instant::now() + frame_interval;
+
+            loop {
+                // Get the latest frame (automatically drops old buffered frames)
+                camera.capture_latest_frame(&mut image_frame)?;
+                converter.convert(&image_frame, &mut ascii_frame)?;
+                renderer.render(&ascii_frame)?;
+
+                // Only sleep if we finished early, otherwise skip to catch up
+                let now = Instant::now();
+                if next_frame_time > now {
+                    sleep(next_frame_time - now).await;
+                } else {
+                    // Running behind - skip sleep to catch up
+                    eprintln!(
+                        "[SOLO] Frame took {:?}ms (target: {:?}ms)",
+                        (now - (next_frame_time - frame_interval)).as_millis(),
+                        frame_interval.as_millis()
+                    );
+                }
+                next_frame_time += frame_interval;
+            }
+        }
     }
 
     /// Receive and respond to the initial handshake from the server

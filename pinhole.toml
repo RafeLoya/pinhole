@@ -1,0 +1,87 @@
+# Pinhole Configuration File
+# This file controls all aspects of the Pinhole client behavior.
+# CLI arguments will override settings specified here.
+
+[video.source]
+# Source type: "webcam", "screen", "file", or "custom"
+type = "webcam"
+
+[video.source.webcam]
+# Device identifier (OS-specific):
+# - macOS: "0:none" (device index:audio input, "none" = no audio)
+# - Linux: "/dev/video0"
+# - Windows: "video=Integrated Camera" (use device name from dshow)
+#
+# To list available devices on Windows, run:
+#   ffmpeg -list_devices true -f dshow -i dummy
+device = "0:none"
+width = 640
+height = 480
+framerate = 30
+pixel_format = "rgb24"
+
+[video.source.screen]
+# Screen capture settings (when type = "screen")
+# - macOS: "1:none" (screen index, 0 = main display, 1+ = secondary)
+# - Linux: ":0.0" (X display)
+# - Windows: "desktop"
+device = "1:none"
+width = 1920
+height = 1080
+framerate = 30
+
+[video.source.file]
+# Video file playback (when type = "file")
+# path = "/path/to/video.mp4"
+
+[video.source.custom]
+# Custom FFmpeg arguments (when type = "custom")
+# args = ["-f", "v4l2", "-i", "/dev/video0", ...]
+
+[video.ffmpeg]
+# Low-latency FFmpeg options
+probesize = 32
+analyzeduration = 0
+fflags = "nobuffer"
+flags = "low_delay"
+
+[ascii]
+# Output ASCII art dimensions (terminal size)
+width = 120
+height = 40
+
+[ascii.chars]
+# Character sets for ASCII rendering
+# intensity: characters for grayscale intensity (darkest to brightest)
+intensity = " .:coPO?@■"
+
+# Edge characters (actual orientation in output is perpendicular to gradient direction)
+vertical = "-━═"      # Horizontal lines in output (vertical gradient)
+horizontal = "|│┃"    # Vertical lines in output (horizontal gradient)
+forward = "/╱⟋"       # Forward slash edges
+back = "\\╲⟍"         # Backslash edges
+
+[image_processing]
+# Edge detection threshold (0-255, higher = fewer edges detected)
+edge_threshold = 127.5
+
+# Contrast adjustment (1.0 = normal, >1.0 = higher contrast, <1.0 = lower)
+contrast = 1.5
+
+# Brightness adjustment (0.0 = normal, positive = brighter, negative = darker)
+brightness = 0.0
+
+[performance]
+# Target frames per second
+fps = 30
+
+# Maximum number of frames to buffer
+frame_buffer = 30
+
+[network]
+# Server connection settings
+tcp_addr = "127.0.0.1:8080"
+udp_addr = "127.0.0.1:4433"
+
+# Session ID (empty = generate random ID)
+session_id = ""

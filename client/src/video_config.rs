@@ -1,3 +1,5 @@
+use crate::config::PinholeConfig;
+
 /// Shared configuration values used by different systems
 /// in the entire program
 pub struct VideoConfig {
@@ -20,6 +22,31 @@ impl VideoConfig {
             edge_threshold: 127.50,
             contrast: 1.5,
             brightness: 0.0,
+        }
+    }
+
+    /// Create VideoConfig from PinholeConfig
+    pub fn from_pinhole_config(config: &PinholeConfig) -> Self {
+        let (width, height) = match config.video.source.r#type.as_str() {
+            "webcam" => (
+                config.video.source.webcam.width,
+                config.video.source.webcam.height,
+            ),
+            "screen" => (
+                config.video.source.screen.width,
+                config.video.source.screen.height,
+            ),
+            _ => (640, 480), // fallback for file/custom
+        };
+
+        Self {
+            camera_width: width,
+            camera_height: height,
+            ascii_width: config.ascii.width,
+            ascii_height: config.ascii.height,
+            edge_threshold: config.image_processing.edge_threshold,
+            contrast: config.image_processing.contrast,
+            brightness: config.image_processing.brightness,
         }
     }
 
