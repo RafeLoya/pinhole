@@ -6,7 +6,6 @@ use std::error::Error;
 /// Setup FFmpeg based on the provided configuration
 pub fn setup_from_config(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
     let source = &config.video.source;
-    let ffmpeg_cfg = &config.video.ffmpeg;
 
     match source.r#type.as_str() {
         "webcam" => setup_webcam(config),
