@@ -11,15 +11,15 @@
 
 # About
 
-Pinhole is a video chat application that functions completely within a shell.
+**pinhole** is a video chat application that functions completely within a shell.
 
-The video feed from two peers in the same session is forwarded between one another in a custom UTF-8 character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
+The video feed from two peers in the same session is forwarded between one another in a UFT character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
 
 This repository contains a server and client binary, where a server facilitates the actual connection between two clients and the forwarding of their video data. End users will likely want to use the client executable, provided a server is up and running.
 
 # Requirements
 
-FFmpeg is automatically downloaded and installed by the `pinhole` client when needed. No manual installation required!
+FFmpeg is automatically downloaded and installed by the `pinhole` client if it is not already installed.
 
 Alternatively, you can install it manually from the [official website](https://ffmpeg.org/download.html) if you prefer.
 
@@ -60,7 +60,7 @@ This is perfect for:
 - Testing your camera setup
 - Verifying your config file settings
 - Previewing different video sources
-- Debugging ASCII rendering settings
+- Debugging your rendering settings
 
 ## Network Mode (Video Chat)
 
