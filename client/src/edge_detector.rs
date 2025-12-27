@@ -1,4 +1,5 @@
 use crate::image_frame::ImageFrame;
+use crossbeam::channel::{self, Receiver, Sender};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -76,11 +77,10 @@ impl ProcessingBuffers {
 pub struct EdgeDetector {
     /// The edge magnitudes and angles of the latest processed `ImageFrame`.
     edge_info: Arc<Mutex<EdgeInfo>>,
-    /// The raw image data of the latest processed `ImageFrame`
-    frame_buffer: Arc<Mutex<Vec<u8>>>,
-    /// Flag, indicates to `EdgeDetector` that there is a new `ImageFrame`
-    /// loaded in `frame_buffer`
-    new_frame_available: Arc<Mutex<bool>>,
+    /// Channel sender for submitting frames to the processing thread
+    frame_sender: Sender<ImageFrame>,
+    /// Channel receiver for the processing thread (taken in start())
+    frame_receiver: Arc<Mutex<Option<Receiver<ImageFrame>>>>,
     /// Minimum gradient magnitude threshold.
     /// Operates from 0.0 to 255.0
     threshold: f32,
@@ -100,14 +100,14 @@ impl EdgeDetector {
             h,
         }));
 
-        let frame_buffer = Arc::new(Mutex::new(Vec::<u8>::with_capacity(w * h * 3)));
-        let new_frame_available = Arc::new(Mutex::new(false));
+        // Create bounded channel with capacity 1 for frame submission
+        let (frame_sender, frame_receiver) = channel::bounded(1);
         let running = Arc::new(Mutex::new(true));
 
         Self {
             edge_info,
-            frame_buffer,
-            new_frame_available,
+            frame_sender,
+            frame_receiver: Arc::new(Mutex::new(Some(frame_receiver))),
             threshold,
             running,
         }
@@ -115,60 +115,63 @@ impl EdgeDetector {
 
     /// Launches the edge detection processing thread.
     ///
-    /// This processing thread continuously checks for new frames produced by
-    /// a camera, then processes them with various algorithms to obtain
-    /// edge information. Communication between threads is enforced by
-    /// shared state protected with mutexes.
+    /// This processing thread continuously receives frames from the channel,
+    /// processes them with various algorithms to obtain edge information.
+    /// Communication between threads is handled via a bounded channel.
     ///
     /// # Returns
     ///
     /// `JoinHandle` for the edge detection processing thread, to manage
     /// or complete its lifetime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `start()` has already been called (receiver already taken).
     pub fn start(
         &self,
         cam_w: usize,
         cam_h: usize,
     ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
         let edge_info = Arc::clone(&self.edge_info);
-        let frame_buffer = Arc::clone(&self.frame_buffer);
-        let new_frame_flag = Arc::clone(&self.new_frame_available);
         let running = Arc::clone(&self.running);
         let threshold = self.threshold;
+
+        // Take the receiver (can only call start() once)
+        let frame_receiver = self
+            .frame_receiver
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or("EdgeDetector already started")?;
 
         let handle = thread::spawn(move || {
             // create processing buffers once for this thread
             let mut buffers = ProcessingBuffers::new(cam_w, cam_h);
 
-            while *running.lock().unwrap() {
-                let process_frame = {
-                    let mut flag = new_frame_flag.lock().unwrap();
-                    let should_proc = *flag;
-                    *flag = false;
-                    should_proc
-                };
+            loop {
+                // block until frame arrives or channel disconnects
+                match frame_receiver.recv() {
+                    Ok(frame) => {
+                        // check running flag before processing
+                        if !*running.lock().unwrap() {
+                            break;
+                        }
 
-                if process_frame {
-                    let frame_data = frame_buffer.lock().unwrap().clone();
+                        // resize buffers if frame dimensions changed (rare case)
+                        buffers.resize_if_needed(frame.w, frame.h);
 
-                    let temp_frame = ImageFrame {
-                        w: cam_w,
-                        h: cam_h,
-                        bytes_per_pixel: 3,
-                        buffer: frame_data,
-                    };
-
-                    // resize buffers if frame dimensions changed (rare case)
-                    buffers.resize_if_needed(temp_frame.w, temp_frame.h);
-
-                    // process frame using reusable buffers
-                    if let Ok(()) = Self::process_frame(&temp_frame, threshold, &mut buffers) {
-                        let mut info = edge_info.lock().unwrap();
-                        // copy processed results into shared EdgeInfo
-                        info.magnitude.copy_from_slice(&buffers.magnitude);
-                        info.angle.copy_from_slice(&buffers.angle);
+                        // process frame using reusable buffers
+                        if let Ok(()) = Self::process_frame(&frame, threshold, &mut buffers) {
+                            let mut info = edge_info.lock().unwrap();
+                            // copy processed results into shared EdgeInfo
+                            info.magnitude.copy_from_slice(&buffers.magnitude);
+                            info.angle.copy_from_slice(&buffers.angle);
+                        }
                     }
-                } else {
-                    //thread::sleep(Duration::from_millis(5));
+                    Err(_) => {
+                        // channel disconnected, exit thread
+                        break;
+                    }
                 }
             }
         });
@@ -179,15 +182,9 @@ impl EdgeDetector {
     /// Utilized by the main program thread to send video frames to
     /// the edge detection thread to be processed
     pub fn submit_frame(&self, frame: &ImageFrame) -> Result<(), Box<dyn Error>> {
-        let mut buffer = self.frame_buffer.lock().unwrap();
-
-        buffer.clear();
-        buffer.extend_from_slice(frame.buffer());
-
-        let mut flag = self.new_frame_available.lock().unwrap();
-        *flag = true;
-
-        Ok(())
+        self.frame_sender
+            .send(frame.clone())
+            .map_err(|_| "EdgeDetector thread disconnected".into())
     }
 
     /// Using the Sobel operator, processes an image frame for edge detection
