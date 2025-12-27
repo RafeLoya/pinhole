@@ -36,20 +36,24 @@ impl From<TestPattern> for PatternType {
     }
 }
 
-/// if wanting to test locally, the command would look something like this:
+/// If wanting to test locally with your webcam, enter the following:
 ///
 /// ```bash
 /// # Solo mode (local preview, no server connection)
 /// cargo run --bin pinhole -- --solo
+/// ```
 ///
+/// To connect to a session with a live server, enter the following:
+///
+/// ```bash
 /// # Network mode
 /// cargo run --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
 /// ```
 ///
 /// where:
-/// - TCP_PORT and UDP_PORT is port of your choosing on 127.0.0.1
-/// - SESSION_ID can be any string (for now)
-/// - PATTERN_TYPE can be either "checkerboard" or "moving-line"
+/// - `TCP_PORT` and `UDP_PORT` is port of your choosing on 127.0.0.1
+/// - `SESSION_ID` can be any string (for now)
+/// - `PATTERN_TYPE` can be either "`checkerboard`" or "`moving-line`"
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
