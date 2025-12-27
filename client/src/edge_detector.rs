@@ -19,6 +19,58 @@ pub struct EdgeInfo {
     pub h: usize,
 }
 
+/// Reusable buffers for edge detection processing.
+/// These are owned by the processing thread and never shared.
+struct ProcessingBuffers {
+    /// Grayscale intensity map (w * h)
+    intensity: Vec<f32>,
+    /// Sobel gradient in x direction (w * h)
+    gx: Vec<f32>,
+    /// Sobel gradient in y direction (w * h)
+    gy: Vec<f32>,
+    /// Edge magnitude values (w * h)
+    magnitude: Vec<f32>,
+    /// Edge angle values (w * h)
+    angle: Vec<f32>,
+    /// Result buffer for non-maximum suppression (w * h)
+    suppression_result: Vec<f32>,
+    /// Dimensions these buffers were allocated for
+    w: usize,
+    h: usize,
+}
+
+impl ProcessingBuffers {
+    /// Create new buffers pre-allocated to given dimensions
+    fn new(w: usize, h: usize) -> Self {
+        let size = w * h;
+        Self {
+            intensity: vec![0.0; size],
+            gx: vec![0.0; size],
+            gy: vec![0.0; size],
+            magnitude: vec![0.0; size],
+            angle: vec![0.0; size],
+            suppression_result: vec![0.0; size],
+            w,
+            h,
+        }
+    }
+
+    /// Resize buffers if dimensions changed (rare case)
+    fn resize_if_needed(&mut self, w: usize, h: usize) {
+        if self.w != w || self.h != h {
+            let size = w * h;
+            self.intensity.resize(size, 0.0);
+            self.gx.resize(size, 0.0);
+            self.gy.resize(size, 0.0);
+            self.magnitude.resize(size, 0.0);
+            self.angle.resize(size, 0.0);
+            self.suppression_result.resize(size, 0.0);
+            self.w = w;
+            self.h = h;
+        }
+    }
+}
+
 /// Thread that processes given `ImageFrames` using our edge detection methods
 /// and returns that information to apply it to the final `AsciiFrame`
 pub struct EdgeDetector {
@@ -84,6 +136,9 @@ impl EdgeDetector {
         let threshold = self.threshold;
 
         let handle = thread::spawn(move || {
+            // create processing buffers once for this thread
+            let mut buffers = ProcessingBuffers::new(cam_w, cam_h);
+
             while *running.lock().unwrap() {
                 let process_frame = {
                     let mut flag = new_frame_flag.lock().unwrap();
@@ -102,10 +157,15 @@ impl EdgeDetector {
                         buffer: frame_data,
                     };
 
-                    if let Ok((magnitude, angle)) = Self::process_frame(&temp_frame, threshold) {
+                    // resize buffers if frame dimensions changed (rare case)
+                    buffers.resize_if_needed(temp_frame.w, temp_frame.h);
+
+                    // process frame using reusable buffers
+                    if let Ok(()) = Self::process_frame(&temp_frame, threshold, &mut buffers) {
                         let mut info = edge_info.lock().unwrap();
-                        info.magnitude = magnitude;
-                        info.angle = angle;
+                        // copy processed results into shared EdgeInfo
+                        info.magnitude.copy_from_slice(&buffers.magnitude);
+                        info.angle.copy_from_slice(&buffers.angle);
                     }
                 } else {
                     //thread::sleep(Duration::from_millis(5));
@@ -130,31 +190,38 @@ impl EdgeDetector {
         Ok(())
     }
 
-    /// Using the Sobel operator, processes an image frame fo edge detection
+    /// Using the Sobel operator, processes an image frame for edge detection
     /// after retrieving the grayscale intensity map
     fn process_frame(
         frame: &ImageFrame,
         threshold: f32,
-    ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
-        let intensity = Self::create_intensity_map(frame);
-        let (gx, gy) = Self::sobel(&intensity, frame.w, frame.h);
-
-        let mut magnitude = vec![0.0; frame.w * frame.h];
-        let mut angle = vec![0.0; frame.w * frame.h];
+        buffers: &mut ProcessingBuffers,
+    ) -> Result<(), Box<dyn Error>> {
+        Self::create_intensity_map(frame, &mut buffers.intensity);
+        Self::sobel(&buffers.intensity, frame.w, frame.h, &mut buffers.gx, &mut buffers.gy);
 
         // for each pixel...
-        for i in 0..gx.len() {
+        for i in 0..(frame.w * frame.h) {
             // get the strength / intensity of the edge
-            magnitude[i] = (gx[i] * gx[i] + gy[i] * gy[i]).sqrt();
+            buffers.magnitude[i] = (buffers.gx[i] * buffers.gx[i] + buffers.gy[i] * buffers.gy[i]).sqrt();
             // get the direction of the edge
-            angle[i] = gy[i].atan2(gx[i]);
+            buffers.angle[i] = buffers.gy[i].atan2(buffers.gx[i]);
         }
 
         // thin edges & remove edges that are most likely just noise
-        let magnitude =
-            Self::non_maximum_suppression(&magnitude, &angle, frame.w, frame.h, threshold);
+        Self::non_maximum_suppression(
+            &buffers.magnitude,
+            &buffers.angle,
+            frame.w,
+            frame.h,
+            threshold,
+            &mut buffers.suppression_result,
+        );
 
-        Ok((magnitude, angle))
+        // copy suppressed magnitude back to magnitude buffer
+        buffers.magnitude.copy_from_slice(&buffers.suppression_result);
+
+        Ok(())
     }
 
     /// Retrieve the edge information from the `EdgeDetector`
@@ -176,9 +243,7 @@ impl EdgeDetector {
 
     /// Extracts intensity values from an RGB image to be used
     /// for edge detection
-    fn create_intensity_map(frame: &ImageFrame) -> Vec<f32> {
-        let mut intensity = vec![0.0; frame.w * frame.h];
-
+    fn create_intensity_map(frame: &ImageFrame, intensity: &mut [f32]) {
         for y in 0..frame.h {
             for x in 0..frame.w {
                 if let Some((r, g, b)) = frame.get_pixel(x, y) {
@@ -187,8 +252,6 @@ impl EdgeDetector {
                 }
             }
         }
-
-        intensity
     }
 
     /// Applies the Sobel operator to a matrix containing the intensities of
@@ -198,10 +261,7 @@ impl EdgeDetector {
     /// The Sobel kernels are defined as follows:
     /// - `Gx = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]`
     /// - `Gy = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]]`
-    fn sobel(intensity: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<f32>) {
-        let mut gx = vec![0.0; w * h];
-        let mut gy = vec![0.0; w * h];
-
+    fn sobel(intensity: &[f32], w: usize, h: usize, gx: &mut [f32], gy: &mut [f32]) {
         for y in 1..(h - 1) {
             for x in 1..(w - 1) {
                 let i = y * w + x;
@@ -223,8 +283,6 @@ impl EdgeDetector {
                         1.0 * intensity[(y + 1) * w + (x + 1)]; // Gy(2,2)
             }
         }
-
-        (gx, gy)
     }
 
     /// Performs non-maximum suppression on a gradient magnitude to thin edges.
@@ -241,8 +299,10 @@ impl EdgeDetector {
         w: usize,
         h: usize,
         threshold: f32,
-    ) -> Vec<f32> {
-        let mut result = vec![0.0; w * h];
+        result: &mut [f32],
+    ) {
+        // clear result buffer first
+        result.fill(0.0);
 
         for y in 1..(h - 1) {
             for x in 1..(w - 1) {
@@ -291,7 +351,5 @@ impl EdgeDetector {
                 }
             }
         }
-
-        result
     }
 }
