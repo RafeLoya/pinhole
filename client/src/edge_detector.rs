@@ -1,4 +1,5 @@
 use crate::image_frame::ImageFrame;
+use arc_swap::ArcSwap;
 use crossbeam::channel::{self, Receiver, Sender};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
@@ -10,13 +11,13 @@ use std::thread;
 
 /// The edge values for a given pixel
 pub struct EdgeInfo {
-    /// the strength / intensity of an edge, if it exists
+    /// The strength / intensity of an edge, if it exists
     pub magnitude: Vec<f32>,
-    /// the angle of an edge, if it exists
+    /// The angle of an edge, if it exists
     pub angle: Vec<f32>,
-    /// the width of the camera it will receive image frames from
+    /// The width of the camera it will receive image frames from
     pub w: usize,
-    /// the height of the camera it will receive image frames from
+    /// The height of the camera it will receive image frames from
     pub h: usize,
 }
 
@@ -76,7 +77,8 @@ impl ProcessingBuffers {
 /// and returns that information to apply it to the final `AsciiFrame`
 pub struct EdgeDetector {
     /// The edge magnitudes and angles of the latest processed `ImageFrame`.
-    edge_info: Arc<Mutex<EdgeInfo>>,
+    /// Uses atomic swap for lock-free reads.
+    edge_info: Arc<ArcSwap<EdgeInfo>>,
     /// Channel sender for submitting frames to the processing thread
     frame_sender: Sender<ImageFrame>,
     /// Channel receiver for the processing thread (taken in start())
@@ -93,7 +95,7 @@ impl EdgeDetector {
     pub const DEFAULT_EDGE_THRESHOLD: f32 = 20.0;
 
     pub fn new(w: usize, h: usize, threshold: f32) -> Self {
-        let edge_info = Arc::new(Mutex::new(EdgeInfo {
+        let edge_info = Arc::new(ArcSwap::from_pointee(EdgeInfo {
             magnitude: vec![0.0; w * h],
             angle: vec![0.0; w * h],
             w,
@@ -132,7 +134,7 @@ impl EdgeDetector {
         cam_w: usize,
         cam_h: usize,
     ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
-        let edge_info = Arc::clone(&self.edge_info);
+        let edge_info: Arc<ArcSwap<EdgeInfo>> = Arc::clone(&self.edge_info);
         let running = Arc::clone(&self.running);
         let threshold = self.threshold;
 
@@ -162,10 +164,14 @@ impl EdgeDetector {
 
                         // process frame using reusable buffers
                         if let Ok(()) = Self::process_frame(&frame, threshold, &mut buffers) {
-                            let mut info = edge_info.lock().unwrap();
-                            // copy processed results into shared EdgeInfo
-                            info.magnitude.copy_from_slice(&buffers.magnitude);
-                            info.angle.copy_from_slice(&buffers.angle);
+                            // create new EdgeInfo and atomically swap it in
+                            let new_info = Arc::new(EdgeInfo {
+                                magnitude: buffers.magnitude.clone(),
+                                angle: buffers.angle.clone(),
+                                w: buffers.w,
+                                h: buffers.h,
+                            });
+                            edge_info.store(new_info);
                         }
                     }
                     Err(_) => {
@@ -222,15 +228,9 @@ impl EdgeDetector {
     }
 
     /// Retrieve the edge information from the `EdgeDetector`
-    pub fn get_edge_info(&self) -> Result<EdgeInfo, Box<dyn Error>> {
-        let edge_info = self.edge_info.lock().unwrap();
-
-        Ok(EdgeInfo {
-            magnitude: edge_info.magnitude.clone(),
-            angle: edge_info.angle.clone(),
-            w: edge_info.w,
-            h: edge_info.h,
-        })
+    /// Returns an Arc reference to the edge info (lock-free, no cloning)
+    pub fn get_edge_info(&self) -> Arc<EdgeInfo> {
+        self.edge_info.load_full()
     }
 
     pub fn stop(&self) {

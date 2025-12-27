@@ -87,7 +87,7 @@ impl Client {
         udp_socket.connect(&self.server_udp_addr).await?;
 
         // === SESSION HANDSHAKE (JOIN + REGISTER_UDP) ============================================
-        // Sends JOIN request to server to either create a new session or
+        // sends JOIN request to server to either create a new session or
         // join a preexisting one
         tcp_wr
             .write_all(format!("JOIN {}\n", self.session_id).as_bytes())
@@ -103,7 +103,7 @@ impl Client {
         let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
 
         // === TCP SESSION CONTROL ================================================================
-        // Reads control messages from server, updating local state about
+        // reads control messages from server, updating local state about
         // session connection and / or peer presence.
         let ctrl_conn_tx = self.conn_flag_tx.clone();
         let ctrl_peer_tx = self.peer_flag_tx.clone();
@@ -141,7 +141,7 @@ impl Client {
         });
 
         // === FRAME RENDERING ====================================================================
-        // Receive incoming frames and render.
+        // receive incoming frames and render.
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
@@ -154,6 +154,8 @@ impl Client {
             while *rend_conn_rx.borrow() {
                 // blocks until peer is present
                 let _ = rend_peer_rx.wait_for(|peer| *peer).await;
+
+                let frame_start = Instant::now();
 
                 let mut next_frame = None;
                 loop {
@@ -188,20 +190,25 @@ impl Client {
                 let _ = renderer.render(&next_frame.unwrap());
 
                 let now = Instant::now();
+                let frame_time = (now - frame_start).as_millis();
+
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    eprintln!(
-                        "[RENDER] Time over by {:?} ms!",
-                        (now - next_frame_time).as_millis()
+                    // display frame time warning below the render window
+                    let message = format!(
+                        "[RENDER] Frame took {}ms (target: {}ms)",
+                        frame_time,
+                        frame_interval.as_millis()
                     );
+                    let _ = renderer.write_status_message(&message);
                 }
                 next_frame_time = Instant::now() + frame_interval;
             }
         });
 
         // === FRAME CAPTURE, ENCODING, AND SENDING ===============================================
-        // Receive AsciiFrame, then serialize and send to peer via UDP if present.
+        // receive AsciiFrame, then serialize and send to peer via UDP if present.
         let send_conn_rx = self.conn_flag_rx.clone();
         let mut send_peer_rx = self.peer_flag_rx.clone();
         let udp_send = udp_socket.clone();
@@ -227,7 +234,7 @@ impl Client {
         });
 
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
-        // From either a mock frame generator or the camera,
+        // from either a mock frame generator or the camera,
         // create the ASCII frames to send to the peer.
         let cfg = VideoConfig::from_pinhole_config(&self.config);
         if let Some(pattern) = &self.test_pattern {
@@ -301,7 +308,7 @@ impl Client {
 
             println!("Generating test pattern...");
 
-            // Proper frame timing
+            // proper frame timing
             let frame_interval = Duration::from_millis(1000 / 30);
             let mut next_frame_time = Instant::now() + frame_interval;
 
@@ -309,7 +316,7 @@ impl Client {
                 let frame = frame_gen.generate_frame()?;
                 renderer.render(&frame)?;
 
-                // Only sleep if we finished early
+                // only sleep if we finished early
                 let now = Instant::now();
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
@@ -317,7 +324,7 @@ impl Client {
                 next_frame_time += frame_interval;
             }
         } else {
-            // Camera/screen/file mode
+            // camera/screen/file mode
             let mut camera = Camera::from_config(&self.config)?;
 
             // Enable frame-dropping mode to prevent buffering lag
@@ -344,27 +351,33 @@ impl Client {
 
             println!("Capturing from {}...", self.config.video.source.r#type);
 
-            // Proper frame timing to maintain target FPS
+            // proper frame timing to maintain target FPS
             let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
             let mut next_frame_time = Instant::now() + frame_interval;
 
             loop {
-                // Get the latest frame (automatically drops old buffered frames)
+                let frame_start = Instant::now();
+
+                // get the latest frame (automatically drops old buffered frames)
                 camera.capture_latest_frame(&mut image_frame)?;
                 converter.convert(&image_frame, &mut ascii_frame)?;
                 renderer.render(&ascii_frame)?;
 
-                // Only sleep if we finished early, otherwise skip to catch up
+                // calculate actual frame processing time
                 let now = Instant::now();
+                let frame_time = (now - frame_start).as_millis();
+
+                // only sleep if we finished early, otherwise skip to catch up
                 if next_frame_time > now {
                     sleep(next_frame_time - now).await;
                 } else {
-                    // Running behind - skip sleep to catch up
-                    eprintln!(
-                        "[SOLO] Frame took {:?}ms (target: {:?}ms)",
-                        (now - (next_frame_time - frame_interval)).as_millis(),
+                    // running behind - display frame time below the render window
+                    let message = format!(
+                        "[SOLO] Frame took {}ms (target: {}ms)",
+                        frame_time,
                         frame_interval.as_millis()
                     );
+                    let _ = renderer.write_status_message(&message);
                 }
                 next_frame_time += frame_interval;
             }

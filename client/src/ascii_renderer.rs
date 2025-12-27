@@ -152,6 +152,21 @@ impl AsciiRenderer {
 
         bytes
     }
+
+    /// Write a status message below the rendered frame
+    ///
+    /// Positions the cursor at row (frame_height + 1) and writes the message.
+    /// This prevents the message from being overwritten by the frame rendering.
+    pub fn write_status_message(&self, message: &str) -> Result<(), Box<dyn Error>> {
+        // Position cursor below the frame (row = prev_h + 1, col = 1)
+        print!("\x1B[{};1H", self.prev_h + 1);
+        // Clear the line to remove previous message remnants
+        print!("\x1B[2K");
+        // Write the message
+        print!("{}", message);
+        io::stdout().flush()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

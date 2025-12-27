@@ -119,7 +119,7 @@ impl AsciiConverter {
         let scale_y = i_frame.h as f32 / a_frame.h as f32;
 
         // retrieve processed edge info
-        let edge_info = self.edge_detector.get_edge_info()?;
+        let edge_info = self.edge_detector.get_edge_info();
 
         for y in 0..a_frame.h {
             for x in 0..a_frame.w {
