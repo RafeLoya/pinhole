@@ -86,7 +86,8 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    // Load configuration from file or use defaults
+    // === CONFIGURATION FILE =====================================================================
+    // load configuration from file or use defaults
     let mut config = if args.config.exists() {
         println!("Loading config from: {}", args.config.display());
         PinholeConfig::from_file(&args.config)?
@@ -98,6 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         PinholeConfig::default()
     };
 
+    // === CLI ARGUMENTS ==========================================================================
     // CLI arguments override config file settings
     if let Some(tcp_addr) = args.tcp_addr {
         config.network.tcp_addr = tcp_addr;
@@ -116,23 +118,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
-    // Solo mode - local preview without network
+    // === SOLO (PREVIEW) MODE ====================================================================
+    // local preview without network connection
     if args.solo {
         println!("Running in solo mode (local preview only)");
         println!("Press Ctrl+C to exit");
 
         let client = Client::new(
-            String::new(), // No TCP addr needed
-            String::new(), // No UDP addr needed
-            String::new(), // No session ID needed
+            String::new(), // no TCP addr needed
+            String::new(), // no UDP addr needed
+            String::new(), // no session ID needed
             pattern_type,
             config,
         );
 
         client.run_solo().await?;
     } else {
-        // Network mode - connect to server and peer
-        // Generate random session ID if not provided
+        // === NETWORK MODE =======================================================================
+        // connect to server and peer
+        // generate random session ID if not provided
         let session_id = if config.network.session_id.is_empty() {
             let rand_id: u32 = rand::rng().random();
             format!("session-{}", rand_id)

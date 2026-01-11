@@ -204,7 +204,7 @@ impl Camera {
             .as_ref()
             .ok_or("frame dropping not enabled - call enable_frame_dropping() first")?;
 
-        // Get the latest frame from the background thread
+        // get the latest frame from the background thread
         let frame_data = latest_frame.lock().unwrap();
 
         if frame_data.len() != frame.buffer().len() {
@@ -216,7 +216,7 @@ impl Camera {
             .into());
         }
 
-        // Copy the latest frame
+        // copy latest frame
         frame.buffer_mut().copy_from_slice(&frame_data);
 
         Ok(())
@@ -225,17 +225,17 @@ impl Camera {
 
 impl Drop for Camera {
     fn drop(&mut self) {
-        // Stop background thread if running
+        // stop background thread if running
         if let Some(running) = &self.running {
             *running.lock().unwrap() = false;
         }
 
-        // Wait for thread to finish
+        // wait for thread to finish
         if let Some(thread) = self.reader_thread.take() {
             let _ = thread.join();
         }
 
-        // Kill FFmpeg when Camera is dropped
+        // kill FFmpeg when Camera is dropped
         if let Err(e) = self.ffmpeg_proc.kill() {
             eprintln!("failed to kill ffmpeg: {}", e);
         }

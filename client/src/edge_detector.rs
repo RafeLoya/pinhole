@@ -9,7 +9,7 @@ use std::thread;
 // TODO: Remove `.unwrap()`s in the future for error recovery
 // TODO: Allow user to influence data members
 
-/// The edge values for a given pixel
+/// The edge values for each pixel in a given ImageFrame
 pub struct EdgeInfo {
     /// The strength / intensity of an edge, if it exists
     pub magnitude: Vec<f32>,
@@ -91,7 +91,7 @@ pub struct EdgeDetector {
 }
 
 impl EdgeDetector {
-    /// default `threshold` value if none is provided
+    /// Default `threshold` value if none is provided
     pub const DEFAULT_EDGE_THRESHOLD: f32 = 20.0;
 
     pub fn new(w: usize, h: usize, threshold: f32) -> Self {
@@ -102,7 +102,7 @@ impl EdgeDetector {
             h,
         }));
 
-        // Create bounded channel with capacity 1 for frame submission
+        // create bounded channel with capacity 1 for frame submission
         let (frame_sender, frame_receiver) = channel::bounded(1);
         let running = Arc::new(Mutex::new(true));
 
@@ -138,7 +138,7 @@ impl EdgeDetector {
         let running = Arc::clone(&self.running);
         let threshold = self.threshold;
 
-        // Take the receiver (can only call start() once)
+        // take the receiver (can only call start() once)
         let frame_receiver = self
             .frame_receiver
             .lock()
@@ -269,7 +269,7 @@ impl EdgeDetector {
                         -2.0 * intensity[y * w + (x - 1)] +       // Gx(1,0)
                         2.0 * intensity[y * w + (x + 1)] +        // Gx(1,2)
                         -1.0 * intensity[(y + 1) * w + (x - 1)] + // Gx(2,0)
-                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gx(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gx(2,2)
 
                 // ditto
                 gy[i] = -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gy(0,0)
@@ -277,7 +277,7 @@ impl EdgeDetector {
                         -1.0 * intensity[(y - 1) * w + (x + 1)] + // Gy(0,2)
                         1.0 * intensity[(y + 1) * w + (x - 1)] +  // Gy(2,0)
                         2.0 * intensity[(y + 1) * w + x] +        // Gy(2,1)
-                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gy(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gy(2,2)
             }
         }
     }

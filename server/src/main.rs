@@ -10,7 +10,7 @@ use std::error::Error;
 /// If you want to test locally, can simply use:
 ///
 /// ```bash
-/// cargo run --bin pinhole-server
+/// cargo run --release --bin pinhole-server
 /// ```
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]

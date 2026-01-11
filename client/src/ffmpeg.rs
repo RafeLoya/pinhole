@@ -48,7 +48,7 @@ fn setup_webcam(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
         return Err("Current OS not supported".into());
     }
 
-    // Output format and low-latency options
+    // output format and low-latency options
     cmd.format("rawvideo")
         .pix_fmt(&webcam.pixel_format)
         .args(["-probesize", &ffmpeg_cfg.probesize.to_string()])
@@ -78,17 +78,17 @@ fn setup_screen(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
         cmd.format("x11grab")
             .args(["-framerate", &screen.framerate.to_string()])
             .args(["-video_size", &format!("{}x{}", screen.width, screen.height)])
-            .input(":0.0");
+            .input(&screen.device);
     } else if cfg!(target_os = "windows") {
         println!("Windows screen capture - using gdigrab");
         cmd.format("gdigrab")
             .args(["-framerate", &screen.framerate.to_string()])
-            .input("desktop");
+            .input(&screen.device);
     } else {
         return Err("Current OS not supported for screen capture".into());
     }
 
-    // Output format and low-latency options
+    // output format and low-latency options
     cmd.format("rawvideo")
         .pix_fmt("rgb24")
         .args(["-probesize", &ffmpeg_cfg.probesize.to_string()])

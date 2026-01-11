@@ -55,11 +55,11 @@ height = 40
 # intensity: characters for grayscale intensity (darkest to brightest)
 intensity = " .:coPO?@■"
 
-# Edge characters (actual orientation in output is perpendicular to gradient direction)
-vertical = "-━═"      # Horizontal lines in output (vertical gradient)
-horizontal = "|│┃"    # Vertical lines in output (horizontal gradient)
-forward = "/╱⟋"       # Forward slash edges
-back = "\\╲⟍"         # Backslash edges
+# Edge characters (ordered from thin to thick based on edge strength)
+horizontal_lines = "-━═"      # Horizontal edges (—)
+vertical_lines = "|│┃"        # Vertical edges (│)
+forward_diagonal = "/╱⟋"      # Forward slash edges (/)
+back_diagonal = "\\╲⟍"        # Backslash edges (\)
 
 [image_processing]
 # Edge detection threshold (0-255, higher = fewer edges detected)

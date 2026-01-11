@@ -16,11 +16,6 @@ use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{Instant, sleep};
 
-/// Max amount of frames that can be buffered
-const FRAME_BUFFER: usize = 30;
-/// Target framerate for rendering
-const FPS: u64 = 30;
-
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
 /// Can either use a camera or generate a test patten
@@ -32,12 +27,16 @@ pub struct Client {
     /// Session ID client attempts to join
     session_id: String,
     /// Flag for session connection.
-    /// Written to by TCP-control, read by other tasks
+    /// Written to by TCP-control
     conn_flag_tx: watch::Sender<bool>,
+    /// Flag for session connection.
+    /// Read by other tasks
     conn_flag_rx: watch::Receiver<bool>,
-    /// Flag for if peer is on other end of session
-    /// Written to by TCP-control, read by sender & renderer
+    /// Flag for if peer is on other end of session.
+    /// Written to by TCP-control
     peer_flag_tx: watch::Sender<bool>,
+    /// Flag for if peer is on other end of session.
+    /// Read by sender & renderer
     peer_flag_rx: watch::Receiver<bool>,
     /// Optionally, pattern can be used instead of camera
     test_pattern: Option<PatternType>,
@@ -100,7 +99,7 @@ impl Client {
 
         // println!("joined session: {}", self.session_id);
 
-        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
+        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(self.config.performance.frame_buffer);
 
         // === TCP SESSION CONTROL ================================================================
         // reads control messages from server, updating local state about
@@ -145,7 +144,7 @@ impl Client {
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
-        let frame_interval = Duration::from_millis(1000 / FPS);
+        let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
@@ -260,10 +259,10 @@ impl Client {
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal.chars().collect(),
-                self.config.ascii.chars.vertical.chars().collect(),
-                self.config.ascii.chars.forward.chars().collect(),
-                self.config.ascii.chars.back.chars().collect(),
+                self.config.ascii.chars.horizontal_lines.chars().collect(),
+                self.config.ascii.chars.vertical_lines.chars().collect(),
+                self.config.ascii.chars.forward_diagonal.chars().collect(),
+                self.config.ascii.chars.back_diagonal.chars().collect(),
                 cfg.camera_width,
                 cfg.camera_height,
                 cfg.edge_threshold,
@@ -289,13 +288,13 @@ impl Client {
     }
 
     /// Run in solo mode - local preview without network connection
-    /// This allows testing webcam/screen/file capture and ASCII rendering
+    /// This allows testing webcam / screen / file capture and ASCII rendering
     /// without needing a server or peer
     pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
         let cfg = VideoConfig::from_pinhole_config(&self.config);
 
         if let Some(pattern) = &self.test_pattern {
-            // Mock pattern mode
+            // mock pattern mode
             let pattern_val = match pattern {
                 PatternType::Checkerboard => PatternType::Checkerboard,
                 PatternType::MovingLine => PatternType::MovingLine,
@@ -324,10 +323,10 @@ impl Client {
                 next_frame_time += frame_interval;
             }
         } else {
-            // camera/screen/file mode
+            // camera / screen / file mode
             let mut camera = Camera::from_config(&self.config)?;
 
-            // Enable frame-dropping mode to prevent buffering lag
+            // enable frame-dropping mode to prevent buffering lag
             camera.enable_frame_dropping()?;
             println!("Frame-dropping mode enabled (always renders latest frame)");
 
@@ -336,10 +335,10 @@ impl Client {
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal.chars().collect(),
-                self.config.ascii.chars.vertical.chars().collect(),
-                self.config.ascii.chars.forward.chars().collect(),
-                self.config.ascii.chars.back.chars().collect(),
+                self.config.ascii.chars.horizontal_lines.chars().collect(),
+                self.config.ascii.chars.vertical_lines.chars().collect(),
+                self.config.ascii.chars.forward_diagonal.chars().collect(),
+                self.config.ascii.chars.back_diagonal.chars().collect(),
                 cfg.camera_width,
                 cfg.camera_height,
                 cfg.edge_threshold,
@@ -350,8 +349,7 @@ impl Client {
             let mut renderer = AsciiRenderer::new()?;
 
             println!("Capturing from {}...", self.config.video.source.r#type);
-
-            // proper frame timing to maintain target FPS
+            
             let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
             let mut next_frame_time = Instant::now() + frame_interval;
 

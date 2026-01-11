@@ -19,13 +19,13 @@ This repository contains a server and client binary, where a server facilitates 
 
 # Requirements
 
-FFmpeg is automatically downloaded and installed by the `pinhole` client if it is not already installed.
+FFmpeg is automatically downloaded and installed by the pinhole client if it is not already installed.
 
-Alternatively, you can install it manually from the [official website](https://ffmpeg.org/download.html) if you prefer.
+Alternatively, it can be installed from the [official website](https://ffmpeg.org/download.html).
 
 # Installation
 
-Pinhole supports macOS, Linux, and Windows.
+pinhole supports macOS, Linux, and Windows.
 
 ## Building From Source
 
@@ -68,10 +68,10 @@ Connect to a server and join a session with another peer:
 
 ```shell
 # Join a session (requires running server)
-cargo run --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
+cargo run --release --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
 
 # Example with local server
-cargo run --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
+cargo run --release --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
 ```
 
 ## Configuration
@@ -108,7 +108,7 @@ See `pinhole.toml` for a complete example with all available options.
 On Windows, you need to specify your camera's exact name:
 
 ```shell
-ffmpeg -list_devices true -f dshow -i dummy
+ffmpeg -list_devices true -f dshow -i dummy 
 ```
 
 Then update your config:

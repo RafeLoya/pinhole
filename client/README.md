@@ -2,14 +2,14 @@ If wanting to test locally with your webcam, enter the following:
 
  ```bash
  # Solo mode (local preview, no server connection)
- cargo run --bin pinhole -- --solo
+ cargo run --release --bin pinhole -- --solo
  ```
 
  To connect to a session with a live server, enter the following:
 
  ```bash
  # Network mode
- cargo run --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID>
+ cargo run --release --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID>
  ```
 
  where:

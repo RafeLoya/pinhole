@@ -3,5 +3,5 @@
  If you want to test locally, can simply use:
 
  ```bash
- cargo run --bin pinhole-server
+ cargo run --release --bin pinhole-server
  ```

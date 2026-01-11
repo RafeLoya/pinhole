@@ -18,22 +18,14 @@ pub struct AsciiConverter {
     edge_detector: EdgeDetector,
     /// Intensity for `AsciiFrame` "pixels"
     ascii_intensity: Vec<char>,
-    /// Characters for horizontal edges in `AsciiFrame` representation
-    ///
-    /// NOTE: 'horizontal' is in reference to the gradient direction, not
-    /// their angle in the original / ASCII image, so these will actually
-    /// be vertical characters in the final output (i.e. "|│┃")
-    ascii_horizontal: Vec<char>,
-    /// Characters for vertical edges in `AsciiFrame` representation
-    ///
-    /// NOTE: 'vertical' here means is in reference to the gradient direction,
-    /// not their angle in the original / ASCII image, so these will actually
-    /// be horizontal characters in the final output (i.e. "-━═")
-    ascii_vertical: Vec<char>,
-    /// Characters for forward edges in `AsciiFrame` representation
-    ascii_forward: Vec<char>,
-    /// Characters for back edges in `AsciiFrame` representation
-    ascii_back: Vec<char>,
+    /// Characters for horizontal line edges (e.g., "-━═")
+    ascii_horizontal_lines: Vec<char>,
+    /// Characters for vertical line edges (e.g., "|│┃")
+    ascii_vertical_lines: Vec<char>,
+    /// Characters for forward diagonal edges (e.g., "/╱⟋")
+    ascii_forward_diagonal: Vec<char>,
+    /// Characters for back diagonal edges (e.g., "\\╲⟍")
+    ascii_back_diagonal: Vec<char>,
     /// Minimum gradient magnitude for edge detection
     edge_threshold: f32,
     /// Adjustment factor for contrast.
@@ -46,19 +38,19 @@ pub struct AsciiConverter {
 
 impl AsciiConverter {
     pub const DEFAULT_ASCII_INTENSITY: &'static str = " .:coPO?@■";
-    pub const DEFAULT_ASCII_VERTICAL: &'static str = "-━═";
-    pub const DEFAULT_ASCII_HORIZONTAL: &'static str = "|│┃";
-    pub const DEFAULT_ASCII_FORWARD: &'static str = "/╱⟋";
-    pub const DEFAULT_ASCII_BACK: &'static str = "\\╲⟍";
+    pub const DEFAULT_ASCII_HORIZONTAL_LINES: &'static str = "-━═";
+    pub const DEFAULT_ASCII_VERTICAL_LINES: &'static str = "|│┃";
+    pub const DEFAULT_ASCII_FORWARD_DIAGONAL: &'static str = "/╱⟋";
+    pub const DEFAULT_ASCII_BACK_DIAGONAL: &'static str = "\\╲⟍";
     pub const DEFAULT_CONTRAST: f32 = 1.5;
     pub const DEFAULT_BRIGHTNESS: f32 = 0.0;
 
     pub fn new(
         ascii_intensity: Vec<char>,
-        ascii_horizontal: Vec<char>,
-        ascii_vertical: Vec<char>,
-        ascii_forward: Vec<char>,
-        ascii_back: Vec<char>,
+        ascii_horizontal_lines: Vec<char>,
+        ascii_vertical_lines: Vec<char>,
+        ascii_forward_diagonal: Vec<char>,
+        ascii_back_diagonal: Vec<char>,
         w: usize,
         h: usize,
         edge_threshold: f32,
@@ -72,10 +64,10 @@ impl AsciiConverter {
         Ok(Self {
             edge_detector,
             ascii_intensity,
-            ascii_horizontal,
-            ascii_vertical,
-            ascii_forward,
-            ascii_back,
+            ascii_horizontal_lines,
+            ascii_vertical_lines,
+            ascii_forward_diagonal,
+            ascii_back_diagonal,
             edge_threshold,
             contrast,
             brightness,
@@ -85,10 +77,10 @@ impl AsciiConverter {
     pub fn default() -> Result<Self, Box<dyn Error>> {
         Self::new(
             Self::DEFAULT_ASCII_INTENSITY.chars().collect(),
-            Self::DEFAULT_ASCII_HORIZONTAL.chars().collect(),
-            Self::DEFAULT_ASCII_VERTICAL.chars().collect(),
-            Self::DEFAULT_ASCII_FORWARD.chars().collect(),
-            Self::DEFAULT_ASCII_BACK.chars().collect(),
+            Self::DEFAULT_ASCII_HORIZONTAL_LINES.chars().collect(),
+            Self::DEFAULT_ASCII_VERTICAL_LINES.chars().collect(),
+            Self::DEFAULT_ASCII_FORWARD_DIAGONAL.chars().collect(),
+            Self::DEFAULT_ASCII_BACK_DIAGONAL.chars().collect(),
             640,
             480,
             EdgeDetector::DEFAULT_EDGE_THRESHOLD,
@@ -179,17 +171,21 @@ impl AsciiConverter {
         // normalizing to 0-180
         let angle_d = ((angle.to_degrees() % 180.0) + 180.0) % 180.0;
 
-        let char_i = ((magnitude / 255.0) * (self.ascii_horizontal.len() as f32))
-            .min((self.ascii_horizontal.len() - 1) as f32) as usize;
+        let char_i = ((magnitude / 255.0) * (self.ascii_vertical_lines.len() as f32))
+            .min((self.ascii_vertical_lines.len() - 1) as f32) as usize;
 
         if (angle_d >= 0.0 && angle_d < 22.5) || (angle_d >= 157.5 && angle_d < 180.0) {
-            self.ascii_horizontal[char_i.min(self.ascii_horizontal.len() - 1)]
+            // Gradient ~0° (horizontal gradient) → vertical edge
+            self.ascii_vertical_lines[char_i.min(self.ascii_vertical_lines.len() - 1)]
         } else if (angle_d >= 22.5) && (angle_d < 67.5) {
-            self.ascii_forward[char_i.min(self.ascii_forward.len() - 1)]
+            // Gradient ~45° → forward diagonal edge
+            self.ascii_forward_diagonal[char_i.min(self.ascii_forward_diagonal.len() - 1)]
         } else if (angle_d >= 67.5) && (angle_d < 112.5) {
-            self.ascii_vertical[char_i.min(self.ascii_vertical.len() - 1)]
+            // Gradient ~90° (vertical gradient) → horizontal edge
+            self.ascii_horizontal_lines[char_i.min(self.ascii_horizontal_lines.len() - 1)]
         } else {
-            self.ascii_back[char_i.min(self.ascii_back.len() - 1)]
+            // Gradient ~135° → back diagonal edge
+            self.ascii_back_diagonal[char_i.min(self.ascii_back_diagonal.len() - 1)]
         }
     }
 }
