@@ -1,9 +1,6 @@
 use std::error::Error;
 use std::str::from_utf8;
 
-const DEFAULT_W: usize = 120;
-const DEFAULT_H: usize = 40;
-
 /// ASCII representation of an `ImageFrame` after contrast, brightness,
 /// and luminance transformations
 #[derive(Clone)]

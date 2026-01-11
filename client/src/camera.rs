@@ -1,6 +1,7 @@
 use crate::config::PinholeConfig;
 use crate::ffmpeg;
 use crate::image_frame::ImageFrame;
+use arc_swap::ArcSwap;
 use ffmpeg_sidecar::child::FfmpegChild;
 use std::error::Error;
 use std::io::{BufReader, Read};
@@ -10,6 +11,12 @@ use std::thread::{self, JoinHandle};
 
 /// Amount of bytes used per pixel in the RGB24 color format
 const DEFAULT_BYTES_PER_PIXEL: usize = 3;
+
+/// Frame data with sequence tracking for duplicate detection
+struct FrameData {
+    buffer: Vec<u8>,
+    sequence: u64,
+}
 
 /// Spawns FFmpeg as a child process, reads the video frames
 /// and captures it into an `ImageFrame`
@@ -27,10 +34,12 @@ pub struct Camera {
     frame_buffer: Vec<u8>,
     /// Background thread for continuous frame reading (frame dropping mode)
     reader_thread: Option<JoinHandle<()>>,
-    /// Latest frame buffer shared with background thread
-    latest_frame: Option<Arc<Mutex<Vec<u8>>>>,
+    /// Latest frame data shared with background thread (lock-free)
+    latest_frame: Option<Arc<ArcSwap<FrameData>>>,
     /// Flag to stop the reader thread
     running: Option<Arc<Mutex<bool>>>,
+    /// Last sequence number seen (for duplicate detection)
+    last_sequence: u64,
 }
 
 impl Camera {
@@ -59,6 +68,7 @@ impl Camera {
             reader_thread: None,
             latest_frame: None,
             running: None,
+            last_sequence: 0,
         })
     }
 
@@ -74,8 +84,8 @@ impl Camera {
                 config.video.source.screen.height,
             ),
             "file" => {
-                // For files, need to parse dimensions from the stream
-                // For now, using a default size - this could be improved
+                // for files, need to parse dimensions from the stream
+                // for now, using a default size - this could be improved
                 (640, 480)
             }
             _ => (640, 480),
@@ -103,6 +113,7 @@ impl Camera {
             reader_thread: None,
             latest_frame: None,
             running: None,
+            last_sequence: 0,
         })
     }
 
@@ -144,6 +155,7 @@ impl Camera {
     /// Enable frame-dropping mode: spawns a background thread that continuously
     /// reads frames from FFmpeg, keeping only the latest one. This prevents
     /// buffering lag by always providing the freshest available frame.
+    /// Uses lock-free atomic swaps for zero-contention frame access.
     pub fn enable_frame_dropping(&mut self) -> Result<(), Box<dyn Error>> {
         if self.reader_thread.is_some() {
             return Err("frame dropping already enabled".into());
@@ -155,23 +167,31 @@ impl Camera {
             .ok_or("frame reader already taken")?;
 
         let buffer_size = self.w * self.h * DEFAULT_BYTES_PER_PIXEL;
-        let latest_frame = Arc::new(Mutex::new(vec![0u8; buffer_size]));
+        let latest_frame = Arc::new(ArcSwap::from_pointee(FrameData {
+            buffer: vec![0u8; buffer_size],
+            sequence: 0,
+        }));
         let latest_frame_clone = Arc::clone(&latest_frame);
 
         let running = Arc::new(Mutex::new(true));
         let running_clone = Arc::clone(&running);
 
-        // Spawn background thread to continuously read frames
+        // spawn background thread to continuously read frames
         let reader_thread = thread::spawn(move || {
             let mut temp_buffer = vec![0u8; buffer_size];
+            let mut sequence = 0u64;
 
             while *running_clone.lock().unwrap() {
-                // Read next frame from FFmpeg (blocking)
+                // read next frame from FFmpeg (blocking)
                 match frame_reader.read_exact(&mut temp_buffer) {
                     Ok(_) => {
-                        // Update the latest frame (drop old one)
-                        let mut latest = latest_frame_clone.lock().unwrap();
-                        latest.copy_from_slice(&temp_buffer);
+                        sequence += 1;
+                        // atomically swap in new frame data (lock-free)
+                        let new_frame = Arc::new(FrameData {
+                            buffer: temp_buffer.clone(),
+                            sequence,
+                        });
+                        latest_frame_clone.store(new_frame);
                     }
                     Err(_) => {
                         // FFmpeg stopped or error - exit thread
@@ -190,7 +210,8 @@ impl Camera {
 
     /// Capture the latest available frame (only works in frame-dropping mode).
     /// This always returns the freshest frame, dropping any buffered older frames.
-    pub fn capture_latest_frame(&mut self, frame: &mut ImageFrame) -> Result<(), Box<dyn Error>> {
+    /// Returns Ok(true) if a new frame was captured, Ok(false) if duplicate frame.
+    pub fn capture_latest_frame(&mut self, frame: &mut ImageFrame) -> Result<bool, Box<dyn Error>> {
         if frame.w != self.w || frame.h != self.h {
             return Err(format!(
                 "frame dimensions ({}x{}) do not match camera dimensions ({}x{})",
@@ -204,38 +225,42 @@ impl Camera {
             .as_ref()
             .ok_or("frame dropping not enabled - call enable_frame_dropping() first")?;
 
-        // Get the latest frame from the background thread
-        let frame_data = latest_frame.lock().unwrap();
+        // load the latest frame data (lock-free atomic operation)
+        let frame_data = latest_frame.load_full();
 
-        if frame_data.len() != frame.buffer().len() {
+        if frame_data.buffer.len() != frame.buffer().len() {
             return Err(format!(
                 "buffer size not consistent between camera ({}) and frame ({})",
-                frame_data.len(),
+                frame_data.buffer.len(),
                 frame.buffer().len()
             )
             .into());
         }
 
-        // Copy the latest frame
-        frame.buffer_mut().copy_from_slice(&frame_data);
+        // check if this is a duplicate frame
+        let is_new_frame = frame_data.sequence != self.last_sequence;
+        self.last_sequence = frame_data.sequence;
 
-        Ok(())
+        // copy latest frame
+        frame.buffer_mut().copy_from_slice(&frame_data.buffer);
+
+        Ok(is_new_frame)
     }
 }
 
 impl Drop for Camera {
     fn drop(&mut self) {
-        // Stop background thread if running
+        // stop background thread if running
         if let Some(running) = &self.running {
             *running.lock().unwrap() = false;
         }
 
-        // Wait for thread to finish
+        // wait for thread to finish
         if let Some(thread) = self.reader_thread.take() {
             let _ = thread.join();
         }
 
-        // Kill FFmpeg when Camera is dropped
+        // kill FFmpeg when Camera is dropped
         if let Err(e) = self.ffmpeg_proc.kill() {
             eprintln!("failed to kill ffmpeg: {}", e);
         }

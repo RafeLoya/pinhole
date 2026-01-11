@@ -4,7 +4,6 @@ use crate::camera::Camera;
 use crate::config::PinholeConfig;
 use crate::image_frame::ImageFrame;
 use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
-use crate::video_config::VideoConfig;
 use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::sync::Arc;
@@ -15,11 +14,17 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{Instant, sleep};
+use tokio_util::sync::CancellationToken;
 
-/// Max amount of frames that can be buffered
-const FRAME_BUFFER: usize = 30;
-/// Target framerate for rendering
-const FPS: u64 = 30;
+/// Result of frame timing check
+enum FrameTimingAction {
+    /// Sleep for the given duration until next frame
+    Sleep(Duration),
+    /// Reset timing - we're more than 1 frame behind
+    Reset,
+    /// Continue without sleeping - slightly behind but catching up
+    Continue,
+}
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
@@ -32,17 +37,23 @@ pub struct Client {
     /// Session ID client attempts to join
     session_id: String,
     /// Flag for session connection.
-    /// Written to by TCP-control, read by other tasks
+    /// Written to by TCP-control
     conn_flag_tx: watch::Sender<bool>,
+    /// Flag for session connection.
+    /// Read by other tasks
     conn_flag_rx: watch::Receiver<bool>,
-    /// Flag for if peer is on other end of session
-    /// Written to by TCP-control, read by sender & renderer
+    /// Flag for if peer is on other end of session.
+    /// Written to by TCP-control
     peer_flag_tx: watch::Sender<bool>,
+    /// Flag for if peer is on other end of session.
+    /// Read by sender & renderer
     peer_flag_rx: watch::Receiver<bool>,
     /// Optionally, pattern can be used instead of camera
     test_pattern: Option<PatternType>,
     /// Configuration
     config: PinholeConfig,
+    /// Cancellation token for graceful shutdown
+    cancel_token: CancellationToken,
 }
 
 impl Client {
@@ -52,6 +63,7 @@ impl Client {
         session_id: String,
         test_pattern: Option<PatternType>,
         config: PinholeConfig,
+        cancel_token: CancellationToken,
     ) -> Self {
         let (conn_flag_tx, conn_flag_rx) = watch::channel(false);
         let (peer_flag_tx, peer_flag_rx) = watch::channel(false);
@@ -66,6 +78,58 @@ impl Client {
             peer_flag_rx,
             test_pattern,
             config,
+            cancel_token,
+        }
+    }
+
+    /// Get camera dimensions based on source type from config
+    fn get_camera_dimensions(&self) -> (usize, usize) {
+        match self.config.video.source.r#type.as_str() {
+            "webcam" => (
+                self.config.video.source.webcam.width,
+                self.config.video.source.webcam.height,
+            ),
+            "screen" => (
+                self.config.video.source.screen.width,
+                self.config.video.source.screen.height,
+            ),
+            _ => (640, 480), // fallback for file/custom
+        }
+    }
+
+    /// Check frame timing and determine what action to take
+    /// Returns the action and optionally a status message to log
+    fn check_frame_timing(
+        now: Instant,
+        next_frame_time: Instant,
+        frame_time_ms: u128,
+        frame_interval: Duration,
+    ) -> (FrameTimingAction, Option<String>) {
+        let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
+
+        if next_frame_time < one_frame_ago {
+            // more than 1 frame behind - reset to prevent spiraling
+            let message = format!(
+                "Frame took {}ms (target: {}ms) - resetting timing",
+                frame_time_ms,
+                frame_interval.as_millis()
+            );
+            (FrameTimingAction::Reset, Some(message))
+        } else if next_frame_time > now {
+            // on schedule - sleep until next frame
+            (FrameTimingAction::Sleep(next_frame_time - now), None)
+        } else {
+            // slightly behind but catching up
+            let message = if frame_time_ms > frame_interval.as_millis() {
+                Some(format!(
+                    "Frame took {}ms (target: {}ms)",
+                    frame_time_ms,
+                    frame_interval.as_millis()
+                ))
+            } else {
+                None
+            };
+            (FrameTimingAction::Continue, message)
         }
     }
 
@@ -87,7 +151,7 @@ impl Client {
         udp_socket.connect(&self.server_udp_addr).await?;
 
         // === SESSION HANDSHAKE (JOIN + REGISTER_UDP) ============================================
-        // Sends JOIN request to server to either create a new session or
+        // sends JOIN request to server to either create a new session or
         // join a preexisting one
         tcp_wr
             .write_all(format!("JOIN {}\n", self.session_id).as_bytes())
@@ -100,28 +164,35 @@ impl Client {
 
         // println!("joined session: {}", self.session_id);
 
-        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(FRAME_BUFFER);
+        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(self.config.performance.frame_buffer);
 
         // === TCP SESSION CONTROL ================================================================
-        // Reads control messages from server, updating local state about
+        // reads control messages from server, updating local state about
         // session connection and / or peer presence.
         let ctrl_conn_tx = self.conn_flag_tx.clone();
         let ctrl_peer_tx = self.peer_flag_tx.clone();
+        let ctrl_cancel = self.cancel_token.clone();
         task::spawn(async move {
             let mut buf = vec![0u8; 1024];
 
             loop {
-                let n = match tcp_rd.read(&mut buf).await {
-                    // connection to SFU terminated
-                    Ok(0) => {
-                        let _ = ctrl_conn_tx.send(false);
-                        break;
-                    }
-                    // message received
-                    Ok(n) => n,
-                    // read error
-                    Err(e) => {
-                        eprintln!("[CONTROL] TCP read error: {e}");
+                let n = tokio::select! {
+                    result = tcp_rd.read(&mut buf) => match result {
+                        // connection to SFU terminated
+                        Ok(0) => {
+                            let _ = ctrl_conn_tx.send(false);
+                            break;
+                        }
+                        // message received
+                        Ok(n) => n,
+                        // read error
+                        Err(e) => {
+                            eprintln!("[CONTROL] TCP read error: {e}");
+                            let _ = ctrl_conn_tx.send(false);
+                            break;
+                        }
+                    },
+                    _ = ctrl_cancel.cancelled() => {
                         let _ = ctrl_conn_tx.send(false);
                         break;
                     }
@@ -141,19 +212,25 @@ impl Client {
         });
 
         // === FRAME RENDERING ====================================================================
-        // Receive incoming frames and render.
+        // receive incoming frames and render.
         let rend_conn_rx = self.conn_flag_rx.clone();
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
-        let frame_interval = Duration::from_millis(1000 / FPS);
+        let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
+        let rend_cancel = self.cancel_token.clone();
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
             let mut next_frame_time = Instant::now() + frame_interval;
 
-            while *rend_conn_rx.borrow() {
+            while *rend_conn_rx.borrow() && !rend_cancel.is_cancelled() {
                 // blocks until peer is present
-                let _ = rend_peer_rx.wait_for(|peer| *peer).await;
+                tokio::select! {
+                    _ = rend_peer_rx.wait_for(|peer| *peer) => {}
+                    _ = rend_cancel.cancelled() => break
+                }
+
+                let frame_start = Instant::now();
 
                 let mut next_frame = None;
                 loop {
@@ -169,8 +246,11 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit
-                                sleep(Duration::from_millis(1)).await;
+                                // sleep for a tiny bit or exit on cancellation
+                                tokio::select! {
+                                    _ = sleep(Duration::from_millis(1)) => {}
+                                    _ = rend_cancel.cancelled() => return
+                                }
                             }
                         }
                         // actual receive error
@@ -179,8 +259,11 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit
-                                sleep(Duration::from_millis(1)).await;
+                                // sleep for a tiny bit or exit on cancellation
+                                tokio::select! {
+                                    _ = sleep(Duration::from_millis(1)) => {}
+                                    _ = rend_cancel.cancelled() => return
+                                }
                             }
                         }
                     }
@@ -188,38 +271,59 @@ impl Client {
                 let _ = renderer.render(&next_frame.unwrap());
 
                 let now = Instant::now();
-                if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
-                } else {
-                    eprintln!(
-                        "[RENDER] Time over by {:?} ms!",
-                        (now - next_frame_time).as_millis()
-                    );
+                let frame_time = (now - frame_start).as_millis();
+
+                let (action, message) = Self::check_frame_timing(now, next_frame_time, frame_time, frame_interval);
+
+                if let Some(msg) = message {
+                    let _ = renderer.write_status_message(&format!("[RENDER] {}", msg));
                 }
-                next_frame_time = Instant::now() + frame_interval;
+
+                match action {
+                    FrameTimingAction::Reset => {
+                        next_frame_time = now + frame_interval;
+                    }
+                    FrameTimingAction::Sleep(duration) => {
+                        tokio::select! {
+                            _ = sleep(duration) => {}
+                            _ = rend_cancel.cancelled() => return
+                        }
+                        next_frame_time += frame_interval;
+                    }
+                    FrameTimingAction::Continue => {
+                        next_frame_time += frame_interval;
+                    }
+                }
             }
         });
 
         // === FRAME CAPTURE, ENCODING, AND SENDING ===============================================
-        // Receive AsciiFrame, then serialize and send to peer via UDP if present.
+        // receive AsciiFrame, then serialize and send to peer via UDP if present.
         let send_conn_rx = self.conn_flag_rx.clone();
         let mut send_peer_rx = self.peer_flag_rx.clone();
         let udp_send = udp_socket.clone();
         let mut ser_rx = frame_tx.subscribe();
+        let send_cancel = self.cancel_token.clone();
         task::spawn(async move {
-            while *send_conn_rx.borrow() {
+            while *send_conn_rx.borrow() && !send_cancel.is_cancelled() {
                 // blocks until peer is present
-                let _ = send_peer_rx.wait_for(|peer| *peer).await;
+                tokio::select! {
+                    _ = send_peer_rx.wait_for(|peer| *peer) => {}
+                    _ = send_cancel.cancelled() => break
+                }
 
-                match ser_rx.recv().await {
-                    Ok(frame) => {
-                        let data = AsciiRenderer::serialize_frame(&frame);
-                        let _ = udp_send.send(&data).await;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        break;
-                    }
-                    _ => {}
+                tokio::select! {
+                    result = ser_rx.recv() => match result {
+                        Ok(frame) => {
+                            let data = AsciiRenderer::serialize_frame(&frame);
+                            let _ = udp_send.send(&data).await;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                        _ => {}
+                    },
+                    _ = send_cancel.cancelled() => break
                 }
 
                 // TODO: look at notes "Current Caveats of AsciiFrame"
@@ -227,17 +331,18 @@ impl Client {
         });
 
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
-        // From either a mock frame generator or the camera,
+        // from either a mock frame generator or the camera,
         // create the ASCII frames to send to the peer.
-        let cfg = VideoConfig::from_pinhole_config(&self.config);
-        if let Some(pattern) = &self.test_pattern {
-            let pattern_val = match pattern {
-                PatternType::Checkerboard => PatternType::Checkerboard,
-                &PatternType::MovingLine => PatternType::MovingLine,
-            };
 
-            let mut frame_gen =
-                MockFrameGenerator::new(cfg.ascii_width, cfg.ascii_height, 30, pattern_val)?;
+        // get camera dimensions based on source type
+        let (camera_width, camera_height) = self.get_camera_dimensions();
+        if let Some(pattern) = &self.test_pattern {
+            let mut frame_gen = MockFrameGenerator::new(
+                self.config.ascii.width,
+                self.config.ascii.height,
+                30,
+                pattern.clone(),
+            )?;
 
             while *self.conn_flag_rx.borrow() {
                 if *self.peer_flag_rx.borrow() {
@@ -248,28 +353,33 @@ impl Client {
         } else {
             let mut camera = Camera::from_config(&self.config)?;
 
-            let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
-            let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+            let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
+            let mut ascii_frame =
+                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal.chars().collect(),
-                self.config.ascii.chars.vertical.chars().collect(),
-                self.config.ascii.chars.forward.chars().collect(),
-                self.config.ascii.chars.back.chars().collect(),
-                cfg.camera_width,
-                cfg.camera_height,
-                cfg.edge_threshold,
-                cfg.contrast,
-                cfg.brightness,
+                self.config.ascii.chars.horizontal_lines.chars().collect(),
+                self.config.ascii.chars.vertical_lines.chars().collect(),
+                self.config.ascii.chars.forward_diagonal.chars().collect(),
+                self.config.ascii.chars.back_diagonal.chars().collect(),
+                camera_width,
+                camera_height,
+                self.config.image_processing.edge_threshold,
+                self.config.image_processing.contrast,
+                self.config.image_processing.brightness,
             )?;
 
-            while *self.conn_flag_rx.borrow() {
+            while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
                 if *self.peer_flag_rx.borrow() {
                     camera.capture_frame(&mut image_frame)?;
                     converter.convert(&image_frame, &mut ascii_frame)?;
 
-                    let mut output = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+                    let mut output = AsciiFrame::new(
+                        self.config.ascii.width,
+                        self.config.ascii.height,
+                        ' ',
+                    )?;
                     output.set_chars(ascii_frame.chars());
                     let _ = frame_tx.send(output);
                 }
@@ -282,91 +392,134 @@ impl Client {
     }
 
     /// Run in solo mode - local preview without network connection
-    /// This allows testing webcam/screen/file capture and ASCII rendering
+    /// This allows testing webcam / screen / file capture and ASCII rendering
     /// without needing a server or peer
     pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
-        let cfg = VideoConfig::from_pinhole_config(&self.config);
+        // get camera dimensions based on source type
+        let (camera_width, camera_height) = self.get_camera_dimensions();
 
         if let Some(pattern) = &self.test_pattern {
-            // Mock pattern mode
-            let pattern_val = match pattern {
-                PatternType::Checkerboard => PatternType::Checkerboard,
-                PatternType::MovingLine => PatternType::MovingLine,
-            };
-
-            let mut frame_gen =
-                MockFrameGenerator::new(cfg.ascii_width, cfg.ascii_height, 30, pattern_val)?;
+            // mock pattern mode
+            let mut frame_gen = MockFrameGenerator::new(
+                self.config.ascii.width,
+                self.config.ascii.height,
+                30,
+                pattern.clone(),
+            )?;
 
             let mut renderer = AsciiRenderer::new()?;
 
             println!("Generating test pattern...");
 
-            // Proper frame timing
+            // proper frame timing
             let frame_interval = Duration::from_millis(1000 / 30);
             let mut next_frame_time = Instant::now() + frame_interval;
 
             loop {
+                // check for cancellation
+                if self.cancel_token.is_cancelled() {
+                    return Ok(());
+                }
+
                 let frame = frame_gen.generate_frame()?;
                 renderer.render(&frame)?;
 
-                // Only sleep if we finished early
+                // only sleep if we finished early
                 let now = Instant::now();
                 if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
+                    tokio::select! {
+                        _ = sleep(next_frame_time - now) => {}
+                        _ = self.cancel_token.cancelled() => {
+                            return Ok(());
+                        }
+                    }
                 }
                 next_frame_time += frame_interval;
             }
         } else {
-            // Camera/screen/file mode
+            // camera / screen / file mode
             let mut camera = Camera::from_config(&self.config)?;
 
-            // Enable frame-dropping mode to prevent buffering lag
+            // enable frame-dropping mode to prevent buffering lag
             camera.enable_frame_dropping()?;
             println!("Frame-dropping mode enabled (always renders latest frame)");
 
-            let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
-            let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+            let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
+            let mut ascii_frame =
+                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal.chars().collect(),
-                self.config.ascii.chars.vertical.chars().collect(),
-                self.config.ascii.chars.forward.chars().collect(),
-                self.config.ascii.chars.back.chars().collect(),
-                cfg.camera_width,
-                cfg.camera_height,
-                cfg.edge_threshold,
-                cfg.contrast,
-                cfg.brightness,
+                self.config.ascii.chars.horizontal_lines.chars().collect(),
+                self.config.ascii.chars.vertical_lines.chars().collect(),
+                self.config.ascii.chars.forward_diagonal.chars().collect(),
+                self.config.ascii.chars.back_diagonal.chars().collect(),
+                camera_width,
+                camera_height,
+                self.config.image_processing.edge_threshold,
+                self.config.image_processing.contrast,
+                self.config.image_processing.brightness,
             )?;
 
             let mut renderer = AsciiRenderer::new()?;
 
             println!("Capturing from {}...", self.config.video.source.r#type);
 
-            // Proper frame timing to maintain target FPS
             let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
             let mut next_frame_time = Instant::now() + frame_interval;
+            let mut duplicate_count = 0u64;
 
             loop {
-                // Get the latest frame (automatically drops old buffered frames)
-                camera.capture_latest_frame(&mut image_frame)?;
+                // check for cancellation
+                if self.cancel_token.is_cancelled() {
+                    return Ok(());
+                }
+                let frame_start = Instant::now();
+
+                // get the latest frame (automatically drops old buffered frames)
+                let is_new_frame = camera.capture_latest_frame(&mut image_frame)?;
+
+                if !is_new_frame {
+                    duplicate_count += 1;
+                    if duplicate_count % 10 == 0 {
+                        let message = format!(
+                            "[SOLO] Warning: {} duplicate frames (FFmpeg slower than render loop)",
+                            duplicate_count
+                        );
+                        let _ = renderer.write_status_message(&message);
+                    }
+                }
+
                 converter.convert(&image_frame, &mut ascii_frame)?;
                 renderer.render(&ascii_frame)?;
 
-                // Only sleep if we finished early, otherwise skip to catch up
+                // calculate actual frame processing time
                 let now = Instant::now();
-                if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
-                } else {
-                    // Running behind - skip sleep to catch up
-                    eprintln!(
-                        "[SOLO] Frame took {:?}ms (target: {:?}ms)",
-                        (now - (next_frame_time - frame_interval)).as_millis(),
-                        frame_interval.as_millis()
-                    );
+                let frame_time = (now - frame_start).as_millis();
+
+                let (action, message) = Self::check_frame_timing(now, next_frame_time, frame_time, frame_interval);
+
+                if let Some(msg) = message {
+                    let _ = renderer.write_status_message(&format!("[SOLO] {}", msg));
                 }
-                next_frame_time += frame_interval;
+
+                match action {
+                    FrameTimingAction::Reset => {
+                        next_frame_time = now + frame_interval;
+                    }
+                    FrameTimingAction::Sleep(duration) => {
+                        tokio::select! {
+                            _ = sleep(duration) => {}
+                            _ = self.cancel_token.cancelled() => {
+                                return Ok(());
+                            }
+                        }
+                        next_frame_time += frame_interval;
+                    }
+                    FrameTimingAction::Continue => {
+                        next_frame_time += frame_interval;
+                    }
+                }
             }
         }
     }

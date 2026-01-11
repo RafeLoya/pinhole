@@ -11,21 +11,21 @@
 
 # About
 
-Pinhole is a video chat application that functions completely within a shell.
+**pinhole** is a video chat application that functions completely within a shell.
 
-The video feed from two peers in the same session is forwarded between one another in a custom UTF-8 character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
+The video feed from two peers in the same session is forwarded between one another in a UTF character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
 
 This repository contains a server and client binary, where a server facilitates the actual connection between two clients and the forwarding of their video data. End users will likely want to use the client executable, provided a server is up and running.
 
 # Requirements
 
-FFmpeg is automatically downloaded and installed by the `pinhole` client when needed. No manual installation required!
+FFmpeg is automatically downloaded and installed by the pinhole client if it is not already installed.
 
-Alternatively, you can install it manually from the [official website](https://ffmpeg.org/download.html) if you prefer.
+Alternatively, it can be installed from the [official website](https://ffmpeg.org/download.html).
 
 # Installation
 
-Pinhole supports macOS, Linux, and Windows.
+pinhole supports macOS, Linux, and Windows.
 
 ## Building From Source
 
@@ -60,7 +60,7 @@ This is perfect for:
 - Testing your camera setup
 - Verifying your config file settings
 - Previewing different video sources
-- Debugging ASCII rendering settings
+- Debugging your rendering settings
 
 ## Network Mode (Video Chat)
 
@@ -68,10 +68,10 @@ Connect to a server and join a session with another peer:
 
 ```shell
 # Join a session (requires running server)
-cargo run --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
+cargo run --release --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
 
 # Example with local server
-cargo run --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
+cargo run --release --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
 ```
 
 ## Configuration
@@ -108,7 +108,7 @@ See `pinhole.toml` for a complete example with all available options.
 On Windows, you need to specify your camera's exact name:
 
 ```shell
-ffmpeg -list_devices true -f dshow -i dummy
+ffmpeg -list_devices true -f dshow -i dummy 
 ```
 
 Then update your config:

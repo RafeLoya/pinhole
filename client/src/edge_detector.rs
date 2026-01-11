@@ -1,4 +1,6 @@
 use crate::image_frame::ImageFrame;
+use arc_swap::ArcSwap;
+use crossbeam::channel::{self, Receiver, Sender};
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -7,166 +9,232 @@ use std::thread;
 // TODO: Remove `.unwrap()`s in the future for error recovery
 // TODO: Allow user to influence data members
 
-/// The edge values for a given pixel
+/// The edge values for each pixel in a given ImageFrame
 pub struct EdgeInfo {
-    /// the strength / intensity of an edge, if it exists
+    /// The strength / intensity of an edge, if it exists
     pub magnitude: Vec<f32>,
-    /// the angle of an edge, if it exists
+    /// The angle of an edge, if it exists
     pub angle: Vec<f32>,
-    /// the width of the camera it will receive image frames from
+    /// The width of the camera it will receive image frames from
     pub w: usize,
-    /// the height of the camera it will receive image frames from
+    /// The height of the camera it will receive image frames from
     pub h: usize,
+}
+
+/// Reusable buffers for edge detection processing.
+/// These are owned by the processing thread and never shared.
+struct ProcessingBuffers {
+    /// Grayscale intensity map (w * h)
+    intensity: Vec<f32>,
+    /// Sobel gradient in x direction (w * h)
+    gx: Vec<f32>,
+    /// Sobel gradient in y direction (w * h)
+    gy: Vec<f32>,
+    /// Edge magnitude values (w * h)
+    magnitude: Vec<f32>,
+    /// Edge angle values (w * h)
+    angle: Vec<f32>,
+    /// Result buffer for non-maximum suppression (w * h)
+    suppression_result: Vec<f32>,
+    /// Dimensions these buffers were allocated for
+    w: usize,
+    h: usize,
+}
+
+impl ProcessingBuffers {
+    /// Create new buffers pre-allocated to given dimensions
+    fn new(w: usize, h: usize) -> Self {
+        let size = w * h;
+        Self {
+            intensity: vec![0.0; size],
+            gx: vec![0.0; size],
+            gy: vec![0.0; size],
+            magnitude: vec![0.0; size],
+            angle: vec![0.0; size],
+            suppression_result: vec![0.0; size],
+            w,
+            h,
+        }
+    }
+
+    /// Resize buffers if dimensions changed (rare case)
+    fn resize_if_needed(&mut self, w: usize, h: usize) {
+        if self.w != w || self.h != h {
+            let size = w * h;
+            self.intensity.resize(size, 0.0);
+            self.gx.resize(size, 0.0);
+            self.gy.resize(size, 0.0);
+            self.magnitude.resize(size, 0.0);
+            self.angle.resize(size, 0.0);
+            self.suppression_result.resize(size, 0.0);
+            self.w = w;
+            self.h = h;
+        }
+    }
 }
 
 /// Thread that processes given `ImageFrames` using our edge detection methods
 /// and returns that information to apply it to the final `AsciiFrame`
 pub struct EdgeDetector {
     /// The edge magnitudes and angles of the latest processed `ImageFrame`.
-    edge_info: Arc<Mutex<EdgeInfo>>,
-    /// The raw image data of the latest processed `ImageFrame`
-    frame_buffer: Arc<Mutex<Vec<u8>>>,
-    /// Flag, indicates to `EdgeDetector` that there is a new `ImageFrame`
-    /// loaded in `frame_buffer`
-    new_frame_available: Arc<Mutex<bool>>,
+    /// Uses atomic swap for lock-free reads.
+    edge_info: Arc<ArcSwap<EdgeInfo>>,
+    /// Channel sender for submitting frames to the processing thread
+    /// Wrapped in Option so we can close it before joining thread in Drop
+    frame_sender: Option<Sender<ImageFrame>>,
+    /// Channel receiver for the processing thread (taken in start())
+    frame_receiver: Arc<Mutex<Option<Receiver<ImageFrame>>>>,
     /// Minimum gradient magnitude threshold.
     /// Operates from 0.0 to 255.0
     threshold: f32,
     /// Control flag, will terminate the edge detection thread when `false`
     running: Arc<Mutex<bool>>,
+    /// JoinHandle for the processing thread
+    thread_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl EdgeDetector {
-    /// default `threshold` value if none is provided
+    /// Default `threshold` value if none is provided
     pub const DEFAULT_EDGE_THRESHOLD: f32 = 20.0;
 
     pub fn new(w: usize, h: usize, threshold: f32) -> Self {
-        let edge_info = Arc::new(Mutex::new(EdgeInfo {
+        let edge_info = Arc::new(ArcSwap::from_pointee(EdgeInfo {
             magnitude: vec![0.0; w * h],
             angle: vec![0.0; w * h],
             w,
             h,
         }));
 
-        let frame_buffer = Arc::new(Mutex::new(Vec::<u8>::with_capacity(w * h * 3)));
-        let new_frame_available = Arc::new(Mutex::new(false));
+        // create bounded channel with capacity 1 for frame submission
+        let (frame_sender, frame_receiver) = channel::bounded(1);
         let running = Arc::new(Mutex::new(true));
 
         Self {
             edge_info,
-            frame_buffer,
-            new_frame_available,
+            frame_sender: Some(frame_sender),
+            frame_receiver: Arc::new(Mutex::new(Some(frame_receiver))),
             threshold,
             running,
+            thread_handle: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Launches the edge detection processing thread.
     ///
-    /// This processing thread continuously checks for new frames produced by
-    /// a camera, then processes them with various algorithms to obtain
-    /// edge information. Communication between threads is enforced by
-    /// shared state protected with mutexes.
+    /// This processing thread continuously receives frames from the channel,
+    /// processes them with various algorithms to obtain edge information.
+    /// Communication between threads is handled via a bounded channel.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// `JoinHandle` for the edge detection processing thread, to manage
-    /// or complete its lifetime.
+    /// Returns an error if `start()` has already been called (receiver already taken).
     pub fn start(
         &self,
         cam_w: usize,
         cam_h: usize,
-    ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
-        let edge_info = Arc::clone(&self.edge_info);
-        let frame_buffer = Arc::clone(&self.frame_buffer);
-        let new_frame_flag = Arc::clone(&self.new_frame_available);
+    ) -> Result<(), Box<dyn Error>> {
+        let edge_info: Arc<ArcSwap<EdgeInfo>> = Arc::clone(&self.edge_info);
         let running = Arc::clone(&self.running);
         let threshold = self.threshold;
 
+        // take the receiver (can only call start() once)
+        let frame_receiver = self
+            .frame_receiver
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or("EdgeDetector already started")?;
+
         let handle = thread::spawn(move || {
-            while *running.lock().unwrap() {
-                let process_frame = {
-                    let mut flag = new_frame_flag.lock().unwrap();
-                    let should_proc = *flag;
-                    *flag = false;
-                    should_proc
-                };
+            // create processing buffers once for this thread
+            let mut buffers = ProcessingBuffers::new(cam_w, cam_h);
 
-                if process_frame {
-                    let frame_data = frame_buffer.lock().unwrap().clone();
+            loop {
+                // block until frame arrives or channel disconnects
+                match frame_receiver.recv() {
+                    Ok(frame) => {
+                        // check running flag before processing
+                        if !*running.lock().unwrap() {
+                            break;
+                        }
 
-                    let temp_frame = ImageFrame {
-                        w: cam_w,
-                        h: cam_h,
-                        bytes_per_pixel: 3,
-                        buffer: frame_data,
-                    };
+                        // resize buffers if frame dimensions changed (rare case)
+                        buffers.resize_if_needed(frame.w, frame.h);
 
-                    if let Ok((magnitude, angle)) = Self::process_frame(&temp_frame, threshold) {
-                        let mut info = edge_info.lock().unwrap();
-                        info.magnitude = magnitude;
-                        info.angle = angle;
+                        // process frame using reusable buffers
+                        if let Ok(()) = Self::process_frame(&frame, threshold, &mut buffers) {
+                            // create new EdgeInfo and atomically swap it in
+                            let new_info = Arc::new(EdgeInfo {
+                                magnitude: buffers.magnitude.clone(),
+                                angle: buffers.angle.clone(),
+                                w: buffers.w,
+                                h: buffers.h,
+                            });
+                            edge_info.store(new_info);
+                        }
                     }
-                } else {
-                    //thread::sleep(Duration::from_millis(5));
+                    Err(_) => {
+                        // channel disconnected, exit thread
+                        break;
+                    }
                 }
             }
         });
 
-        Ok(handle)
+        // store the handle for cleanup in Drop
+        *self.thread_handle.lock().unwrap() = Some(handle);
+
+        Ok(())
     }
 
     /// Utilized by the main program thread to send video frames to
     /// the edge detection thread to be processed
     pub fn submit_frame(&self, frame: &ImageFrame) -> Result<(), Box<dyn Error>> {
-        let mut buffer = self.frame_buffer.lock().unwrap();
-
-        buffer.clear();
-        buffer.extend_from_slice(frame.buffer());
-
-        let mut flag = self.new_frame_available.lock().unwrap();
-        *flag = true;
-
-        Ok(())
+        self.frame_sender
+            .as_ref()
+            .expect("frame_sender should exist until Drop")
+            .send(frame.clone())
+            .map_err(|_| "EdgeDetector thread disconnected".into())
     }
 
-    /// Using the Sobel operator, processes an image frame fo edge detection
+    /// Using the Sobel operator, processes an image frame for edge detection
     /// after retrieving the grayscale intensity map
     fn process_frame(
         frame: &ImageFrame,
         threshold: f32,
-    ) -> Result<(Vec<f32>, Vec<f32>), Box<dyn Error>> {
-        let intensity = Self::create_intensity_map(frame);
-        let (gx, gy) = Self::sobel(&intensity, frame.w, frame.h);
-
-        let mut magnitude = vec![0.0; frame.w * frame.h];
-        let mut angle = vec![0.0; frame.w * frame.h];
+        buffers: &mut ProcessingBuffers,
+    ) -> Result<(), Box<dyn Error>> {
+        Self::create_intensity_map(frame, &mut buffers.intensity);
+        Self::sobel(&buffers.intensity, frame.w, frame.h, &mut buffers.gx, &mut buffers.gy);
 
         // for each pixel...
-        for i in 0..gx.len() {
+        for i in 0..(frame.w * frame.h) {
             // get the strength / intensity of the edge
-            magnitude[i] = (gx[i] * gx[i] + gy[i] * gy[i]).sqrt();
+            buffers.magnitude[i] = (buffers.gx[i] * buffers.gx[i] + buffers.gy[i] * buffers.gy[i]).sqrt();
             // get the direction of the edge
-            angle[i] = gy[i].atan2(gx[i]);
+            buffers.angle[i] = buffers.gy[i].atan2(buffers.gx[i]);
         }
 
         // thin edges & remove edges that are most likely just noise
-        let magnitude =
-            Self::non_maximum_suppression(&magnitude, &angle, frame.w, frame.h, threshold);
+        Self::non_maximum_suppression(
+            &buffers.magnitude,
+            &buffers.angle,
+            frame.w,
+            frame.h,
+            threshold,
+            &mut buffers.suppression_result,
+        );
 
-        Ok((magnitude, angle))
+        // copy suppressed magnitude back to magnitude buffer
+        buffers.magnitude.copy_from_slice(&buffers.suppression_result);
+
+        Ok(())
     }
 
     /// Retrieve the edge information from the `EdgeDetector`
-    pub fn get_edge_info(&self) -> Result<EdgeInfo, Box<dyn Error>> {
-        let edge_info = self.edge_info.lock().unwrap();
-
-        Ok(EdgeInfo {
-            magnitude: edge_info.magnitude.clone(),
-            angle: edge_info.angle.clone(),
-            w: edge_info.w,
-            h: edge_info.h,
-        })
+    /// Returns an Arc reference to the edge info (lock-free, no cloning)
+    pub fn get_edge_info(&self) -> Arc<EdgeInfo> {
+        self.edge_info.load_full()
     }
 
     pub fn stop(&self) {
@@ -176,9 +244,7 @@ impl EdgeDetector {
 
     /// Extracts intensity values from an RGB image to be used
     /// for edge detection
-    fn create_intensity_map(frame: &ImageFrame) -> Vec<f32> {
-        let mut intensity = vec![0.0; frame.w * frame.h];
-
+    fn create_intensity_map(frame: &ImageFrame, intensity: &mut [f32]) {
         for y in 0..frame.h {
             for x in 0..frame.w {
                 if let Some((r, g, b)) = frame.get_pixel(x, y) {
@@ -187,8 +253,6 @@ impl EdgeDetector {
                 }
             }
         }
-
-        intensity
     }
 
     /// Applies the Sobel operator to a matrix containing the intensities of
@@ -198,10 +262,7 @@ impl EdgeDetector {
     /// The Sobel kernels are defined as follows:
     /// - `Gx = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]`
     /// - `Gy = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]]`
-    fn sobel(intensity: &[f32], w: usize, h: usize) -> (Vec<f32>, Vec<f32>) {
-        let mut gx = vec![0.0; w * h];
-        let mut gy = vec![0.0; w * h];
-
+    fn sobel(intensity: &[f32], w: usize, h: usize, gx: &mut [f32], gy: &mut [f32]) {
         for y in 1..(h - 1) {
             for x in 1..(w - 1) {
                 let i = y * w + x;
@@ -212,7 +273,7 @@ impl EdgeDetector {
                         -2.0 * intensity[y * w + (x - 1)] +       // Gx(1,0)
                         2.0 * intensity[y * w + (x + 1)] +        // Gx(1,2)
                         -1.0 * intensity[(y + 1) * w + (x - 1)] + // Gx(2,0)
-                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gx(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gx(2,2)
 
                 // ditto
                 gy[i] = -1.0 * intensity[(y - 1) * w + (x - 1)] + // Gy(0,0)
@@ -220,11 +281,9 @@ impl EdgeDetector {
                         -1.0 * intensity[(y - 1) * w + (x + 1)] + // Gy(0,2)
                         1.0 * intensity[(y + 1) * w + (x - 1)] +  // Gy(2,0)
                         2.0 * intensity[(y + 1) * w + x] +        // Gy(2,1)
-                        1.0 * intensity[(y + 1) * w + (x + 1)]; // Gy(2,2)
+                        1.0 * intensity[(y + 1) * w + (x + 1)];   // Gy(2,2)
             }
         }
-
-        (gx, gy)
     }
 
     /// Performs non-maximum suppression on a gradient magnitude to thin edges.
@@ -241,8 +300,10 @@ impl EdgeDetector {
         w: usize,
         h: usize,
         threshold: f32,
-    ) -> Vec<f32> {
-        let mut result = vec![0.0; w * h];
+        result: &mut [f32],
+    ) {
+        // clear result buffer first
+        result.fill(0.0);
 
         for y in 1..(h - 1) {
             for x in 1..(w - 1) {
@@ -291,7 +352,22 @@ impl EdgeDetector {
                 }
             }
         }
+    }
+}
 
-        result
+impl Drop for EdgeDetector {
+    fn drop(&mut self) {
+        // signal the thread to stop
+        self.stop();
+
+        // drop the sender to close the channel and unblock the receiver
+        // this will cause recv() in the thread to return Err and exit
+        self.frame_sender.take();
+
+        // now the thread will exit from recv() returning Err
+        // wait for the thread to finish
+        if let Some(handle) = self.thread_handle.lock().unwrap().take() {
+            let _ = handle.join();
+        }
     }
 }

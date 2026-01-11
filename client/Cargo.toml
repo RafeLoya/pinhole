@@ -9,12 +9,27 @@ description = "Client for terminal-based video call service"
 [dependencies]
 common = { path = "../common" }
 
-tokio = { version = "1.40", features = ["full"] }
-clap = { version = "4.5.37", features = ["derive"] }
+tokio = { version = "1.49.0", features = ["full"] }
+tokio-util = "0.7.18"
+clap = { version = "4.5.54", features = ["derive"] }
 rand = "0.9.1"
-ffmpeg-sidecar = "2.3.0"
-serde = { version = "1.0", features = ["derive"] }
-config = "0.14"
+ffmpeg-sidecar = "2.4.0"
+serde = { version = "1.0.228", features = ["derive"] }
+config = "0.15.19"
+itoa = "1.0.17"
+crossbeam = "0.8.4"
+arc-swap = "1.7"
+
+[dev-dependencies]
+criterion = "0.8.1"
+
+[[bench]]
+name = "ascii_rendering"
+harness = false
+
+[lib]
+name = "pinhole"
+path = "src/lib.rs"
 
 [[bin]]
 name = "pinhole"

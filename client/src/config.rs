@@ -103,14 +103,14 @@ pub struct AsciiSettings {
 pub struct AsciiChars {
     #[serde(default = "default_intensity_chars")]
     pub intensity: String,
-    #[serde(default = "default_vertical_chars")]
-    pub vertical: String,
-    #[serde(default = "default_horizontal_chars")]
-    pub horizontal: String,
-    #[serde(default = "default_forward_chars")]
-    pub forward: String,
-    #[serde(default = "default_back_chars")]
-    pub back: String,
+    #[serde(default = "default_horizontal_lines_chars")]
+    pub horizontal_lines: String,
+    #[serde(default = "default_vertical_lines_chars")]
+    pub vertical_lines: String,
+    #[serde(default = "default_forward_diagonal_chars")]
+    pub forward_diagonal: String,
+    #[serde(default = "default_back_diagonal_chars")]
+    pub back_diagonal: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +161,10 @@ fn default_webcam_device() -> String {
 fn default_screen_device() -> String {
     if cfg!(target_os = "macos") {
         "1:none".to_string()
+    } else if cfg!(target_os = "linux") {
+        ":0.0".to_string()
+    } else if cfg!(target_os = "windows") {
+        "desktop".to_string()
     } else {
         "0".to_string()
     }
@@ -218,19 +222,19 @@ fn default_intensity_chars() -> String {
     " .:coPO?@■".to_string()
 }
 
-fn default_vertical_chars() -> String {
+fn default_horizontal_lines_chars() -> String {
     "-━═".to_string()
 }
 
-fn default_horizontal_chars() -> String {
+fn default_vertical_lines_chars() -> String {
     "|│┃".to_string()
 }
 
-fn default_forward_chars() -> String {
+fn default_forward_diagonal_chars() -> String {
     "/╱⟋".to_string()
 }
 
-fn default_back_chars() -> String {
+fn default_back_diagonal_chars() -> String {
     "\\╲⟍".to_string()
 }
 
@@ -357,10 +361,10 @@ impl Default for AsciiChars {
     fn default() -> Self {
         Self {
             intensity: default_intensity_chars(),
-            vertical: default_vertical_chars(),
-            horizontal: default_horizontal_chars(),
-            forward: default_forward_chars(),
-            back: default_back_chars(),
+            horizontal_lines: default_horizontal_lines_chars(),
+            vertical_lines: default_vertical_lines_chars(),
+            forward_diagonal: default_forward_diagonal_chars(),
+            back_diagonal: default_back_diagonal_chars(),
         }
     }
 }

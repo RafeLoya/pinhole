@@ -3,6 +3,7 @@ use std::error::Error;
 use std::time::{Duration, Instant};
 
 /// Test patterns for local development
+#[derive(Clone)]
 pub enum PatternType {
     Checkerboard,
     MovingLine,

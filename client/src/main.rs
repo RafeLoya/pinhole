@@ -9,7 +9,6 @@ mod edge_detector;
 mod ffmpeg;
 mod image_frame;
 mod mock_frame_generator;
-mod video_config;
 
 use crate::client::Client;
 use crate::config::PinholeConfig;
@@ -18,6 +17,8 @@ use clap::{Parser, ValueEnum};
 use rand::Rng;
 use std::error::Error;
 use std::path::PathBuf;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
@@ -36,20 +37,24 @@ impl From<TestPattern> for PatternType {
     }
 }
 
-/// if wanting to test locally, the command would look something like this:
+/// If wanting to test locally with your webcam, enter the following:
 ///
 /// ```bash
 /// # Solo mode (local preview, no server connection)
 /// cargo run --bin pinhole -- --solo
+/// ```
 ///
+/// To connect to a session with a live server, enter the following:
+///
+/// ```bash
 /// # Network mode
 /// cargo run --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
 /// ```
 ///
 /// where:
-/// - TCP_PORT and UDP_PORT is port of your choosing on 127.0.0.1
-/// - SESSION_ID can be any string (for now)
-/// - PATTERN_TYPE can be either "checkerboard" or "moving-line"
+/// - `TCP_PORT` and `UDP_PORT` is port of your choosing on 127.0.0.1
+/// - `SESSION_ID` can be any string (for now)
+/// - `PATTERN_TYPE` can be either "`checkerboard`" or "`moving-line`"
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -82,7 +87,26 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    // Load configuration from file or use defaults
+    // === SHUTDOWN HANDLER =======================================================================
+    // create cancellation token for graceful shutdown coordination
+    let cancel_token = CancellationToken::new();
+    let cancel_token_clone = cancel_token.clone();
+
+    // CTRL+C signal handler
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                println!("Shutdown signal received (Ctrl+C), cleaning up...");
+                cancel_token_clone.cancel();
+            }
+            Err(e) => {
+                eprintln!("Error listening for Ctrl+C: {}", e);
+            }
+        }
+    });
+
+    // === CONFIGURATION FILE =====================================================================
+    // load configuration from file or use defaults
     let mut config = if args.config.exists() {
         println!("Loading config from: {}", args.config.display());
         PinholeConfig::from_file(&args.config)?
@@ -94,6 +118,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         PinholeConfig::default()
     };
 
+    // === CLI ARGUMENTS ==========================================================================
     // CLI arguments override config file settings
     if let Some(tcp_addr) = args.tcp_addr {
         config.network.tcp_addr = tcp_addr;
@@ -108,27 +133,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
-    if let Some(_) = &pattern_type {
+    if pattern_type.is_some() {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
-    // Solo mode - local preview without network
+    // === SOLO (PREVIEW) MODE ====================================================================
+    // local preview without network connection
     if args.solo {
         println!("Running in solo mode (local preview only)");
         println!("Press Ctrl+C to exit");
 
         let client = Client::new(
-            String::new(), // No TCP addr needed
-            String::new(), // No UDP addr needed
-            String::new(), // No session ID needed
+            String::new(), // no TCP addr needed
+            String::new(), // no UDP addr needed
+            String::new(), // no session ID needed
             pattern_type,
             config,
+            cancel_token.clone(),
         );
 
-        client.run_solo().await?;
+        tokio::select! {
+            result = client.run_solo() => {
+                if let Err(e) = result {
+                    eprintln!("Error in solo mode: {}", e);
+                }
+            }
+            _ = cancel_token.cancelled() => {
+                println!("Solo mode shutdown complete");
+            }
+        }
     } else {
-        // Network mode - connect to server and peer
-        // Generate random session ID if not provided
+        // === NETWORK MODE =======================================================================
+        // connect to server and peer
+        // generate random session ID if not provided
         let session_id = if config.network.session_id.is_empty() {
             let rand_id: u32 = rand::rng().random();
             format!("session-{}", rand_id)
@@ -144,10 +181,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             session_id.clone(),
             pattern_type,
             config,
+            cancel_token.clone(),
         );
 
-        client.run().await?;
+        tokio::select! {
+            result = client.run() => {
+                if let Err(e) = result {
+                    eprintln!("Error in network mode: {}", e);
+                }
+            }
+            _ = cancel_token.cancelled() => {
+                println!("Network mode shutdown complete");
+            }
+        }
     }
 
+    println!("pinhole gracefully shut down");
     Ok(())
 }
