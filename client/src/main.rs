@@ -18,6 +18,8 @@ use clap::{Parser, ValueEnum};
 use rand::Rng;
 use std::error::Error;
 use std::path::PathBuf;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
@@ -86,6 +88,24 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
+    // === SHUTDOWN HANDLER =======================================================================
+    // create cancellation token for graceful shutdown coordination
+    let cancel_token = CancellationToken::new();
+    let cancel_token_clone = cancel_token.clone();
+
+    // CTRL+C signal handler
+    tokio::spawn(async move {
+        match signal::ctrl_c().await {
+            Ok(()) => {
+                println!("Shutdown signal received (Ctrl+C), cleaning up...");
+                cancel_token_clone.cancel();
+            }
+            Err(e) => {
+                eprintln!("Error listening for Ctrl+C: {}", e);
+            }
+        }
+    });
+
     // === CONFIGURATION FILE =====================================================================
     // load configuration from file or use defaults
     let mut config = if args.config.exists() {
@@ -130,9 +150,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
             String::new(), // no session ID needed
             pattern_type,
             config,
+            cancel_token.clone(),
         );
 
-        client.run_solo().await?;
+        tokio::select! {
+            result = client.run_solo() => {
+                if let Err(e) = result {
+                    eprintln!("Error in solo mode: {}", e);
+                }
+            }
+            _ = cancel_token.cancelled() => {
+                println!("Solo mode shutdown complete");
+            }
+        }
     } else {
         // === NETWORK MODE =======================================================================
         // connect to server and peer
@@ -152,10 +182,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             session_id.clone(),
             pattern_type,
             config,
+            cancel_token.clone(),
         );
 
-        client.run().await?;
+        tokio::select! {
+            result = client.run() => {
+                if let Err(e) = result {
+                    eprintln!("Error in network mode: {}", e);
+                }
+            }
+            _ = cancel_token.cancelled() => {
+                println!("Network mode shutdown complete");
+            }
+        }
     }
 
+    println!("pinhole gracefully shut down");
     Ok(())
 }

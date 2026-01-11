@@ -80,7 +80,8 @@ pub struct EdgeDetector {
     /// Uses atomic swap for lock-free reads.
     edge_info: Arc<ArcSwap<EdgeInfo>>,
     /// Channel sender for submitting frames to the processing thread
-    frame_sender: Sender<ImageFrame>,
+    /// Wrapped in Option so we can close it before joining thread in Drop
+    frame_sender: Option<Sender<ImageFrame>>,
     /// Channel receiver for the processing thread (taken in start())
     frame_receiver: Arc<Mutex<Option<Receiver<ImageFrame>>>>,
     /// Minimum gradient magnitude threshold.
@@ -88,6 +89,8 @@ pub struct EdgeDetector {
     threshold: f32,
     /// Control flag, will terminate the edge detection thread when `false`
     running: Arc<Mutex<bool>>,
+    /// JoinHandle for the processing thread
+    thread_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl EdgeDetector {
@@ -108,10 +111,11 @@ impl EdgeDetector {
 
         Self {
             edge_info,
-            frame_sender,
+            frame_sender: Some(frame_sender),
             frame_receiver: Arc::new(Mutex::new(Some(frame_receiver))),
             threshold,
             running,
+            thread_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -121,11 +125,6 @@ impl EdgeDetector {
     /// processes them with various algorithms to obtain edge information.
     /// Communication between threads is handled via a bounded channel.
     ///
-    /// # Returns
-    ///
-    /// `JoinHandle` for the edge detection processing thread, to manage
-    /// or complete its lifetime.
-    ///
     /// # Errors
     ///
     /// Returns an error if `start()` has already been called (receiver already taken).
@@ -133,7 +132,7 @@ impl EdgeDetector {
         &self,
         cam_w: usize,
         cam_h: usize,
-    ) -> Result<thread::JoinHandle<()>, Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error>> {
         let edge_info: Arc<ArcSwap<EdgeInfo>> = Arc::clone(&self.edge_info);
         let running = Arc::clone(&self.running);
         let threshold = self.threshold;
@@ -182,13 +181,18 @@ impl EdgeDetector {
             }
         });
 
-        Ok(handle)
+        // store the handle for cleanup in Drop
+        *self.thread_handle.lock().unwrap() = Some(handle);
+
+        Ok(())
     }
 
     /// Utilized by the main program thread to send video frames to
     /// the edge detection thread to be processed
     pub fn submit_frame(&self, frame: &ImageFrame) -> Result<(), Box<dyn Error>> {
         self.frame_sender
+            .as_ref()
+            .expect("frame_sender should exist until Drop")
             .send(frame.clone())
             .map_err(|_| "EdgeDetector thread disconnected".into())
     }
@@ -347,6 +351,23 @@ impl EdgeDetector {
                     result[i] = magnitude[i];
                 }
             }
+        }
+    }
+}
+
+impl Drop for EdgeDetector {
+    fn drop(&mut self) {
+        // signal the thread to stop
+        self.stop();
+
+        // drop the sender to close the channel and unblock the receiver
+        // this will cause recv() in the thread to return Err and exit
+        self.frame_sender.take();
+
+        // now the thread will exit from recv() returning Err
+        // wait for the thread to finish
+        if let Some(handle) = self.thread_handle.lock().unwrap().take() {
+            let _ = handle.join();
         }
     }
 }

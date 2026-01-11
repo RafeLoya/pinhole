@@ -15,6 +15,7 @@ use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{Instant, sleep};
+use tokio_util::sync::CancellationToken;
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
@@ -42,6 +43,8 @@ pub struct Client {
     test_pattern: Option<PatternType>,
     /// Configuration
     config: PinholeConfig,
+    /// Cancellation token for graceful shutdown
+    cancel_token: CancellationToken,
 }
 
 impl Client {
@@ -51,6 +54,7 @@ impl Client {
         session_id: String,
         test_pattern: Option<PatternType>,
         config: PinholeConfig,
+        cancel_token: CancellationToken,
     ) -> Self {
         let (conn_flag_tx, conn_flag_rx) = watch::channel(false);
         let (peer_flag_tx, peer_flag_rx) = watch::channel(false);
@@ -65,6 +69,7 @@ impl Client {
             peer_flag_rx,
             test_pattern,
             config,
+            cancel_token,
         }
     }
 
@@ -106,21 +111,28 @@ impl Client {
         // session connection and / or peer presence.
         let ctrl_conn_tx = self.conn_flag_tx.clone();
         let ctrl_peer_tx = self.peer_flag_tx.clone();
+        let ctrl_cancel = self.cancel_token.clone();
         task::spawn(async move {
             let mut buf = vec![0u8; 1024];
 
             loop {
-                let n = match tcp_rd.read(&mut buf).await {
-                    // connection to SFU terminated
-                    Ok(0) => {
-                        let _ = ctrl_conn_tx.send(false);
-                        break;
-                    }
-                    // message received
-                    Ok(n) => n,
-                    // read error
-                    Err(e) => {
-                        eprintln!("[CONTROL] TCP read error: {e}");
+                let n = tokio::select! {
+                    result = tcp_rd.read(&mut buf) => match result {
+                        // connection to SFU terminated
+                        Ok(0) => {
+                            let _ = ctrl_conn_tx.send(false);
+                            break;
+                        }
+                        // message received
+                        Ok(n) => n,
+                        // read error
+                        Err(e) => {
+                            eprintln!("[CONTROL] TCP read error: {e}");
+                            let _ = ctrl_conn_tx.send(false);
+                            break;
+                        }
+                    },
+                    _ = ctrl_cancel.cancelled() => {
                         let _ = ctrl_conn_tx.send(false);
                         break;
                     }
@@ -145,14 +157,18 @@ impl Client {
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
         let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
+        let rend_cancel = self.cancel_token.clone();
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = AsciiRenderer::new().unwrap();
             let mut next_frame_time = Instant::now() + frame_interval;
 
-            while *rend_conn_rx.borrow() {
+            while *rend_conn_rx.borrow() && !rend_cancel.is_cancelled() {
                 // blocks until peer is present
-                let _ = rend_peer_rx.wait_for(|peer| *peer).await;
+                tokio::select! {
+                    _ = rend_peer_rx.wait_for(|peer| *peer) => {}
+                    _ = rend_cancel.cancelled() => break
+                }
 
                 let frame_start = Instant::now();
 
@@ -170,8 +186,11 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit
-                                sleep(Duration::from_millis(1)).await;
+                                // sleep for a tiny bit or exit on cancellation
+                                tokio::select! {
+                                    _ = sleep(Duration::from_millis(1)) => {}
+                                    _ = rend_cancel.cancelled() => return
+                                }
                             }
                         }
                         // actual receive error
@@ -180,8 +199,11 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit
-                                sleep(Duration::from_millis(1)).await;
+                                // sleep for a tiny bit or exit on cancellation
+                                tokio::select! {
+                                    _ = sleep(Duration::from_millis(1)) => {}
+                                    _ = rend_cancel.cancelled() => return
+                                }
                             }
                         }
                     }
@@ -190,19 +212,36 @@ impl Client {
 
                 let now = Instant::now();
                 let frame_time = (now - frame_start).as_millis();
-
-                if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
-                } else {
-                    // display frame time warning below the render window
+                
+                let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
+                if next_frame_time < one_frame_ago {
+                    // more than 1 frame behind - reset to prevent spiraling
+                    next_frame_time = now + frame_interval;
                     let message = format!(
-                        "[RENDER] Frame took {}ms (target: {}ms)",
+                        "[RENDER] Frame took {}ms (target: {}ms) - resetting timing",
                         frame_time,
                         frame_interval.as_millis()
                     );
                     let _ = renderer.write_status_message(&message);
+                } else if next_frame_time > now {
+                    // on schedule - sleep until next frame
+                    tokio::select! {
+                        _ = sleep(next_frame_time - now) => {}
+                        _ = rend_cancel.cancelled() => return
+                    }
+                    next_frame_time += frame_interval;
+                } else {
+                    // slightly behind but catching up
+                    next_frame_time += frame_interval;
+                    if frame_time > frame_interval.as_millis() {
+                        let message = format!(
+                            "[RENDER] Frame took {}ms (target: {}ms)",
+                            frame_time,
+                            frame_interval.as_millis()
+                        );
+                        let _ = renderer.write_status_message(&message);
+                    }
                 }
-                next_frame_time = Instant::now() + frame_interval;
             }
         });
 
@@ -212,20 +251,27 @@ impl Client {
         let mut send_peer_rx = self.peer_flag_rx.clone();
         let udp_send = udp_socket.clone();
         let mut ser_rx = frame_tx.subscribe();
+        let send_cancel = self.cancel_token.clone();
         task::spawn(async move {
-            while *send_conn_rx.borrow() {
+            while *send_conn_rx.borrow() && !send_cancel.is_cancelled() {
                 // blocks until peer is present
-                let _ = send_peer_rx.wait_for(|peer| *peer).await;
+                tokio::select! {
+                    _ = send_peer_rx.wait_for(|peer| *peer) => {}
+                    _ = send_cancel.cancelled() => break
+                }
 
-                match ser_rx.recv().await {
-                    Ok(frame) => {
-                        let data = AsciiRenderer::serialize_frame(&frame);
-                        let _ = udp_send.send(&data).await;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        break;
-                    }
-                    _ => {}
+                tokio::select! {
+                    result = ser_rx.recv() => match result {
+                        Ok(frame) => {
+                            let data = AsciiRenderer::serialize_frame(&frame);
+                            let _ = udp_send.send(&data).await;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                        _ => {}
+                    },
+                    _ = send_cancel.cancelled() => break
                 }
 
                 // TODO: look at notes "Current Caveats of AsciiFrame"
@@ -270,7 +316,7 @@ impl Client {
                 cfg.brightness,
             )?;
 
-            while *self.conn_flag_rx.borrow() {
+            while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
                 if *self.peer_flag_rx.borrow() {
                     camera.capture_frame(&mut image_frame)?;
                     converter.convert(&image_frame, &mut ascii_frame)?;
@@ -312,13 +358,23 @@ impl Client {
             let mut next_frame_time = Instant::now() + frame_interval;
 
             loop {
+                // check for cancellation
+                if self.cancel_token.is_cancelled() {
+                    return Ok(());
+                }
+
                 let frame = frame_gen.generate_frame()?;
                 renderer.render(&frame)?;
 
                 // only sleep if we finished early
                 let now = Instant::now();
                 if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
+                    tokio::select! {
+                        _ = sleep(next_frame_time - now) => {}
+                        _ = self.cancel_token.cancelled() => {
+                            return Ok(());
+                        }
+                    }
                 }
                 next_frame_time += frame_interval;
             }
@@ -349,15 +405,32 @@ impl Client {
             let mut renderer = AsciiRenderer::new()?;
 
             println!("Capturing from {}...", self.config.video.source.r#type);
-            
+
             let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
             let mut next_frame_time = Instant::now() + frame_interval;
+            let mut duplicate_count = 0u64;
 
             loop {
+                // check for cancellation
+                if self.cancel_token.is_cancelled() {
+                    return Ok(());
+                }
                 let frame_start = Instant::now();
 
                 // get the latest frame (automatically drops old buffered frames)
-                camera.capture_latest_frame(&mut image_frame)?;
+                let is_new_frame = camera.capture_latest_frame(&mut image_frame)?;
+
+                if !is_new_frame {
+                    duplicate_count += 1;
+                    if duplicate_count % 10 == 0 {
+                        let message = format!(
+                            "[SOLO] Warning: {} duplicate frames (FFmpeg slower than render loop)",
+                            duplicate_count
+                        );
+                        let _ = renderer.write_status_message(&message);
+                    }
+                }
+
                 converter.convert(&image_frame, &mut ascii_frame)?;
                 renderer.render(&ascii_frame)?;
 
@@ -365,19 +438,38 @@ impl Client {
                 let now = Instant::now();
                 let frame_time = (now - frame_start).as_millis();
 
-                // only sleep if we finished early, otherwise skip to catch up
-                if next_frame_time > now {
-                    sleep(next_frame_time - now).await;
-                } else {
-                    // running behind - display frame time below the render window
+                // accurate frame pacing with catch-up protection
+                let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
+                if next_frame_time < one_frame_ago {
+                    // more than 1 frame behind - reset to prevent spiraling
+                    next_frame_time = now + frame_interval;
                     let message = format!(
-                        "[SOLO] Frame took {}ms (target: {}ms)",
+                        "[SOLO] Frame took {}ms (target: {}ms) - resetting timing",
                         frame_time,
                         frame_interval.as_millis()
                     );
                     let _ = renderer.write_status_message(&message);
+                } else if next_frame_time > now {
+                    // on schedule - sleep until next frame
+                    tokio::select! {
+                        _ = sleep(next_frame_time - now) => {}
+                        _ = self.cancel_token.cancelled() => {
+                            return Ok(());
+                        }
+                    }
+                    next_frame_time += frame_interval;
+                } else {
+                    // slightly behind but catching up
+                    next_frame_time += frame_interval;
+                    if frame_time > frame_interval.as_millis() {
+                        let message = format!(
+                            "[SOLO] Frame took {}ms (target: {}ms)",
+                            frame_time,
+                            frame_interval.as_millis()
+                        );
+                        let _ = renderer.write_status_message(&message);
+                    }
                 }
-                next_frame_time += frame_interval;
             }
         }
     }

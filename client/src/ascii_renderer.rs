@@ -20,6 +20,7 @@ pub struct AsciiRenderer {
 impl AsciiRenderer {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Self::clear_screen()?;
+        Self::hide_cursor()?;
 
         Ok(AsciiRenderer {
             prev_frame: Vec::new(),
@@ -30,6 +31,20 @@ impl AsciiRenderer {
             // 120x40 = 4,800 chars * 13 bytes = 62,400 bytes for full frame
             output_buffer: Vec::with_capacity(80_000),
         })
+    }
+
+    /// Hides the terminal cursor
+    fn hide_cursor() -> Result<(), Box<dyn Error>> {
+        print!("\x1B[?25l");
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    /// Shows the terminal cursor
+    fn show_cursor() -> Result<(), Box<dyn Error>> {
+        print!("\x1B[?25h");
+        io::stdout().flush()?;
+        Ok(())
     }
 
     /// Prints an ANSI escape code sequence that clears the screen
@@ -165,6 +180,14 @@ impl AsciiRenderer {
         print!("{}", message);
         io::stdout().flush()?;
         Ok(())
+    }
+}
+
+impl Drop for AsciiRenderer {
+    fn drop(&mut self) {
+        // clear screen and restore cursor visibility when renderer is dropped
+        let _ = Self::clear_screen();
+        let _ = Self::show_cursor();
     }
 }
 
