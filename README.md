@@ -13,7 +13,7 @@
 
 **pinhole** is a video chat application that functions completely within a shell.
 
-The video feed from two peers in the same session is forwarded between one another in a UFT character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
+The video feed from two peers in the same session is forwarded between one another in a UTF character representation. With just a network, a shell, and a way to record I-frames, you can send, receive, and render live video!
 
 This repository contains a server and client binary, where a server facilitates the actual connection between two clients and the forwarding of their video data. End users will likely want to use the client executable, provided a server is up and running.
 
