@@ -73,7 +73,7 @@ brightness = 0.0
 
 [performance]
 # Target frames per second
-fps = 30
+fps = 25
 
 # Maximum number of frames to buffer
 frame_buffer = 30
