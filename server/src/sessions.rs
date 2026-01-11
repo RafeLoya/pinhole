@@ -29,6 +29,40 @@ impl Session {
         }
     }
 
+    /// Check if the given address matches client A
+    fn is_client_a(&self, addr: &SocketAddr) -> bool {
+        self.client_a
+            .as_ref()
+            .map(|(a, _)| a == addr)
+            .unwrap_or(false)
+    }
+
+    /// Check if the given address matches client B
+    fn is_client_b(&self, addr: &SocketAddr) -> bool {
+        self.client_b
+            .as_ref()
+            .map(|(b, _)| b == addr)
+            .unwrap_or(false)
+    }
+
+    /// Check if client A matches the address and has no UDP registered
+    fn is_client_a_unregistered(&self, addr: &SocketAddr) -> bool {
+        self.client_a
+            .as_ref()
+            .filter(|(a, _)| a == addr)
+            .map(|_| self.udp_a.is_none())
+            .unwrap_or(false)
+    }
+
+    /// Check if client B matches the address and has no UDP registered
+    fn is_client_b_unregistered(&self, addr: &SocketAddr) -> bool {
+        self.client_b
+            .as_ref()
+            .filter(|(b, _)| b == addr)
+            .map(|_| self.udp_b.is_none())
+            .unwrap_or(false)
+    }
+
     /// Adds client to first available slot
     pub fn add_client(&mut self, addr: SocketAddr, tx: mpsc::UnboundedSender<Message>) -> bool {
         match (&self.client_a, &self.client_b) {
@@ -58,58 +92,28 @@ impl Session {
 
     /// Associates client's TCP address w/ its UDP address
     pub fn register_udp(&mut self, tcp_addr: SocketAddr, udp_port: SocketAddr) {
-        if self
-            .client_a
-            .as_ref()
-            .map(|(a, _)| *a == tcp_addr)
-            .unwrap_or(false)
-        {
+        if self.is_client_a(&tcp_addr) {
             self.udp_a = Some(udp_port)
-        } else if self
-            .client_b
-            .as_ref()
-            .map(|(b, _)| *b == tcp_addr)
-            .unwrap_or(false)
-        {
+        } else if self.is_client_b(&tcp_addr) {
             self.udp_b = Some(udp_port)
         }
     }
 
     pub fn get_peer_udp(&self, tcp_addr: &SocketAddr) -> Option<SocketAddr> {
-        if self
-            .client_a
-            .as_ref()
-            .map(|(a, _)| a == tcp_addr)
-            .unwrap_or(false)
-        {
+        if self.is_client_a(tcp_addr) {
             return self.udp_b;
-        } else if self
-            .client_b
-            .as_ref()
-            .map(|(b, _)| b == tcp_addr)
-            .unwrap_or(false)
-        {
+        } else if self.is_client_b(tcp_addr) {
             return self.udp_a;
         }
         None
     }
 
     pub fn remove_client(&mut self, addr: &SocketAddr) {
-        if self
-            .client_a
-            .as_ref()
-            .map(|(a, _)| a == addr)
-            .unwrap_or(false)
-        {
+        if self.is_client_a(addr) {
             self.client_a = None;
             self.udp_a = None;
             self.connected_notified = false;
-        } else if self
-            .client_b
-            .as_ref()
-            .map(|(b, _)| b == addr)
-            .unwrap_or(false)
-        {
+        } else if self.is_client_b(addr) {
             self.client_b = None;
             self.udp_b = None;
             self.connected_notified = false;
@@ -288,7 +292,7 @@ impl SessionManager {
             }
         }
 
-        // Oh, God!
+        // find TCP client with matching IP that has no UDP registered yet
         let candidate = inner
             .client_sessions
             .keys()
@@ -298,20 +302,7 @@ impl SessionManager {
                     .sessions
                     .get(inner.client_sessions.get(tcp).unwrap())
                     .map(|session| {
-                        let unregistered_a = session
-                            .client_a
-                            .as_ref()
-                            .filter(|(a, _)| a == *tcp)
-                            .map(|_| session.udp_a.is_none())
-                            .unwrap_or(false);
-                        let unregistered_b = session
-                            .client_b
-                            .as_ref()
-                            .filter(|(b, _)| b == *tcp)
-                            .map(|_| session.udp_b.is_none())
-                            .unwrap_or(false);
-
-                        unregistered_a || unregistered_b
+                        session.is_client_a_unregistered(tcp) || session.is_client_b_unregistered(tcp)
                     })
                     .unwrap_or(false)
             })

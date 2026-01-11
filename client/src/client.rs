@@ -4,7 +4,6 @@ use crate::camera::Camera;
 use crate::config::PinholeConfig;
 use crate::image_frame::ImageFrame;
 use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
-use crate::video_config::VideoConfig;
 use common::ascii_frame::AsciiFrame;
 use std::error::Error;
 use std::sync::Arc;
@@ -16,6 +15,16 @@ use tokio::sync::{broadcast, watch};
 use tokio::task;
 use tokio::time::{Instant, sleep};
 use tokio_util::sync::CancellationToken;
+
+/// Result of frame timing check
+enum FrameTimingAction {
+    /// Sleep for the given duration until next frame
+    Sleep(Duration),
+    /// Reset timing - we're more than 1 frame behind
+    Reset,
+    /// Continue without sleeping - slightly behind but catching up
+    Continue,
+}
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
@@ -70,6 +79,57 @@ impl Client {
             test_pattern,
             config,
             cancel_token,
+        }
+    }
+
+    /// Get camera dimensions based on source type from config
+    fn get_camera_dimensions(&self) -> (usize, usize) {
+        match self.config.video.source.r#type.as_str() {
+            "webcam" => (
+                self.config.video.source.webcam.width,
+                self.config.video.source.webcam.height,
+            ),
+            "screen" => (
+                self.config.video.source.screen.width,
+                self.config.video.source.screen.height,
+            ),
+            _ => (640, 480), // fallback for file/custom
+        }
+    }
+
+    /// Check frame timing and determine what action to take
+    /// Returns the action and optionally a status message to log
+    fn check_frame_timing(
+        now: Instant,
+        next_frame_time: Instant,
+        frame_time_ms: u128,
+        frame_interval: Duration,
+    ) -> (FrameTimingAction, Option<String>) {
+        let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
+
+        if next_frame_time < one_frame_ago {
+            // more than 1 frame behind - reset to prevent spiraling
+            let message = format!(
+                "Frame took {}ms (target: {}ms) - resetting timing",
+                frame_time_ms,
+                frame_interval.as_millis()
+            );
+            (FrameTimingAction::Reset, Some(message))
+        } else if next_frame_time > now {
+            // on schedule - sleep until next frame
+            (FrameTimingAction::Sleep(next_frame_time - now), None)
+        } else {
+            // slightly behind but catching up
+            let message = if frame_time_ms > frame_interval.as_millis() {
+                Some(format!(
+                    "Frame took {}ms (target: {}ms)",
+                    frame_time_ms,
+                    frame_interval.as_millis()
+                ))
+            } else {
+                None
+            };
+            (FrameTimingAction::Continue, message)
         }
     }
 
@@ -212,34 +272,26 @@ impl Client {
 
                 let now = Instant::now();
                 let frame_time = (now - frame_start).as_millis();
-                
-                let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
-                if next_frame_time < one_frame_ago {
-                    // more than 1 frame behind - reset to prevent spiraling
-                    next_frame_time = now + frame_interval;
-                    let message = format!(
-                        "[RENDER] Frame took {}ms (target: {}ms) - resetting timing",
-                        frame_time,
-                        frame_interval.as_millis()
-                    );
-                    let _ = renderer.write_status_message(&message);
-                } else if next_frame_time > now {
-                    // on schedule - sleep until next frame
-                    tokio::select! {
-                        _ = sleep(next_frame_time - now) => {}
-                        _ = rend_cancel.cancelled() => return
+
+                let (action, message) = Self::check_frame_timing(now, next_frame_time, frame_time, frame_interval);
+
+                if let Some(msg) = message {
+                    let _ = renderer.write_status_message(&format!("[RENDER] {}", msg));
+                }
+
+                match action {
+                    FrameTimingAction::Reset => {
+                        next_frame_time = now + frame_interval;
                     }
-                    next_frame_time += frame_interval;
-                } else {
-                    // slightly behind but catching up
-                    next_frame_time += frame_interval;
-                    if frame_time > frame_interval.as_millis() {
-                        let message = format!(
-                            "[RENDER] Frame took {}ms (target: {}ms)",
-                            frame_time,
-                            frame_interval.as_millis()
-                        );
-                        let _ = renderer.write_status_message(&message);
+                    FrameTimingAction::Sleep(duration) => {
+                        tokio::select! {
+                            _ = sleep(duration) => {}
+                            _ = rend_cancel.cancelled() => return
+                        }
+                        next_frame_time += frame_interval;
+                    }
+                    FrameTimingAction::Continue => {
+                        next_frame_time += frame_interval;
                     }
                 }
             }
@@ -281,15 +333,16 @@ impl Client {
         // === FRAME GENERATION (WEBCAM OR TEST PATTERN) ==========================================
         // from either a mock frame generator or the camera,
         // create the ASCII frames to send to the peer.
-        let cfg = VideoConfig::from_pinhole_config(&self.config);
-        if let Some(pattern) = &self.test_pattern {
-            let pattern_val = match pattern {
-                PatternType::Checkerboard => PatternType::Checkerboard,
-                &PatternType::MovingLine => PatternType::MovingLine,
-            };
 
-            let mut frame_gen =
-                MockFrameGenerator::new(cfg.ascii_width, cfg.ascii_height, 30, pattern_val)?;
+        // get camera dimensions based on source type
+        let (camera_width, camera_height) = self.get_camera_dimensions();
+        if let Some(pattern) = &self.test_pattern {
+            let mut frame_gen = MockFrameGenerator::new(
+                self.config.ascii.width,
+                self.config.ascii.height,
+                30,
+                pattern.clone(),
+            )?;
 
             while *self.conn_flag_rx.borrow() {
                 if *self.peer_flag_rx.borrow() {
@@ -300,8 +353,9 @@ impl Client {
         } else {
             let mut camera = Camera::from_config(&self.config)?;
 
-            let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
-            let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+            let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
+            let mut ascii_frame =
+                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
@@ -309,11 +363,11 @@ impl Client {
                 self.config.ascii.chars.vertical_lines.chars().collect(),
                 self.config.ascii.chars.forward_diagonal.chars().collect(),
                 self.config.ascii.chars.back_diagonal.chars().collect(),
-                cfg.camera_width,
-                cfg.camera_height,
-                cfg.edge_threshold,
-                cfg.contrast,
-                cfg.brightness,
+                camera_width,
+                camera_height,
+                self.config.image_processing.edge_threshold,
+                self.config.image_processing.contrast,
+                self.config.image_processing.brightness,
             )?;
 
             while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
@@ -321,7 +375,11 @@ impl Client {
                     camera.capture_frame(&mut image_frame)?;
                     converter.convert(&image_frame, &mut ascii_frame)?;
 
-                    let mut output = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+                    let mut output = AsciiFrame::new(
+                        self.config.ascii.width,
+                        self.config.ascii.height,
+                        ' ',
+                    )?;
                     output.set_chars(ascii_frame.chars());
                     let _ = frame_tx.send(output);
                 }
@@ -337,17 +395,17 @@ impl Client {
     /// This allows testing webcam / screen / file capture and ASCII rendering
     /// without needing a server or peer
     pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
-        let cfg = VideoConfig::from_pinhole_config(&self.config);
+        // get camera dimensions based on source type
+        let (camera_width, camera_height) = self.get_camera_dimensions();
 
         if let Some(pattern) = &self.test_pattern {
             // mock pattern mode
-            let pattern_val = match pattern {
-                PatternType::Checkerboard => PatternType::Checkerboard,
-                PatternType::MovingLine => PatternType::MovingLine,
-            };
-
-            let mut frame_gen =
-                MockFrameGenerator::new(cfg.ascii_width, cfg.ascii_height, 30, pattern_val)?;
+            let mut frame_gen = MockFrameGenerator::new(
+                self.config.ascii.width,
+                self.config.ascii.height,
+                30,
+                pattern.clone(),
+            )?;
 
             let mut renderer = AsciiRenderer::new()?;
 
@@ -386,8 +444,9 @@ impl Client {
             camera.enable_frame_dropping()?;
             println!("Frame-dropping mode enabled (always renders latest frame)");
 
-            let mut image_frame = ImageFrame::new(cfg.camera_width, cfg.camera_height, 3)?;
-            let mut ascii_frame = AsciiFrame::new(cfg.ascii_width, cfg.ascii_height, ' ')?;
+            let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
+            let mut ascii_frame =
+                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().collect(),
@@ -395,11 +454,11 @@ impl Client {
                 self.config.ascii.chars.vertical_lines.chars().collect(),
                 self.config.ascii.chars.forward_diagonal.chars().collect(),
                 self.config.ascii.chars.back_diagonal.chars().collect(),
-                cfg.camera_width,
-                cfg.camera_height,
-                cfg.edge_threshold,
-                cfg.contrast,
-                cfg.brightness,
+                camera_width,
+                camera_height,
+                self.config.image_processing.edge_threshold,
+                self.config.image_processing.contrast,
+                self.config.image_processing.brightness,
             )?;
 
             let mut renderer = AsciiRenderer::new()?;
@@ -438,36 +497,27 @@ impl Client {
                 let now = Instant::now();
                 let frame_time = (now - frame_start).as_millis();
 
-                // accurate frame pacing with catch-up protection
-                let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
-                if next_frame_time < one_frame_ago {
-                    // more than 1 frame behind - reset to prevent spiraling
-                    next_frame_time = now + frame_interval;
-                    let message = format!(
-                        "[SOLO] Frame took {}ms (target: {}ms) - resetting timing",
-                        frame_time,
-                        frame_interval.as_millis()
-                    );
-                    let _ = renderer.write_status_message(&message);
-                } else if next_frame_time > now {
-                    // on schedule - sleep until next frame
-                    tokio::select! {
-                        _ = sleep(next_frame_time - now) => {}
-                        _ = self.cancel_token.cancelled() => {
-                            return Ok(());
-                        }
+                let (action, message) = Self::check_frame_timing(now, next_frame_time, frame_time, frame_interval);
+
+                if let Some(msg) = message {
+                    let _ = renderer.write_status_message(&format!("[SOLO] {}", msg));
+                }
+
+                match action {
+                    FrameTimingAction::Reset => {
+                        next_frame_time = now + frame_interval;
                     }
-                    next_frame_time += frame_interval;
-                } else {
-                    // slightly behind but catching up
-                    next_frame_time += frame_interval;
-                    if frame_time > frame_interval.as_millis() {
-                        let message = format!(
-                            "[SOLO] Frame took {}ms (target: {}ms)",
-                            frame_time,
-                            frame_interval.as_millis()
-                        );
-                        let _ = renderer.write_status_message(&message);
+                    FrameTimingAction::Sleep(duration) => {
+                        tokio::select! {
+                            _ = sleep(duration) => {}
+                            _ = self.cancel_token.cancelled() => {
+                                return Ok(());
+                            }
+                        }
+                        next_frame_time += frame_interval;
+                    }
+                    FrameTimingAction::Continue => {
+                        next_frame_time += frame_interval;
                     }
                 }
             }

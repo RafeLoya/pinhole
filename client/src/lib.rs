@@ -6,7 +6,6 @@ pub mod edge_detector;
 pub mod image_frame;
 pub mod camera;
 pub mod config;
-pub mod video_config;
 pub mod mock_frame_generator;
 pub mod ffmpeg;
 pub mod client;

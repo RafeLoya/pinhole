@@ -9,7 +9,6 @@ mod edge_detector;
 mod ffmpeg;
 mod image_frame;
 mod mock_frame_generator;
-mod video_config;
 
 use crate::client::Client;
 use crate::config::PinholeConfig;
@@ -134,7 +133,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let pattern_type = args.test_pattern.map(|p| PatternType::from(p));
-    if let Some(_) = &pattern_type {
+    if pattern_type.is_some() {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
