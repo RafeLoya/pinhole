@@ -46,13 +46,13 @@ cargo build --release --bin pinhole-server
 Test your webcam, screen capture, or video file without connecting to a server:
 
 ```shell
-# Preview your webcam
+# preview your webcam
 cargo run --bin pinhole -- --solo
 
-# Preview with test pattern
+# preview with test pattern
 cargo run --bin pinhole -- --solo -p checkerboard
 
-# Preview with custom config
+# preview with custom config
 cargo run --bin pinhole -- --solo -c my-config.toml
 ```
 
@@ -67,12 +67,37 @@ This is perfect for:
 Connect to a server and join a session with another peer:
 
 ```shell
-# Join a session (requires running server)
+# join a session (requires running server)
 cargo run --release --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
 
-# Example with local server
+# example with local server
 cargo run --release --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
 ```
+
+## Dimension Control **(WIP)**
+
+Control the ASCII frame dimensions using presets or custom values:
+
+```shell
+# use a preset size
+cargo run --bin pinhole -- --solo --preset small    # 80x24 (UDP safe)
+cargo run --bin pinhole -- --solo --preset medium   # 120x40 (UDP safe, default)
+cargo run --bin pinhole -- --solo --preset large    # 160x50 (may have packet loss)
+cargo run --bin pinhole -- --solo --preset xlarge   # 200x60 (currently not working w/ UDP)
+
+# or specify exact dimensions
+cargo run --bin pinhole -- --solo --width 100 --height 30
+
+# combine preset with overrides (width/height override preset)
+cargo run --bin pinhole -- --solo --preset large --height 60
+```
+
+**Current UDP Limitations:**
+- **Small/Medium presets** (~1400-5000 bytes): Work reliably over UDP
+- **Large preset** (~8000 bytes): May experience packet fragmentation and loss
+- **XLarge preset** (~12000 bytes): Will not work over UDP due to packet fragmentation
+
+**Note:** The diff compression significantly reduces bandwidth after the first frame, but initial Full frames must still fit within UDP limits.
 
 ## Configuration
 

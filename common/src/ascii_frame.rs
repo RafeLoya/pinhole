@@ -1,20 +1,27 @@
+use crate::frame_pixel::FramePixel;
 use std::error::Error;
-use std::str::from_utf8;
 
 /// ASCII representation of an `ImageFrame` after contrast, brightness,
-/// and luminance transformations
+/// and luminance transformations.
+///
+/// Stores character-agnostic pixel data that can be mapped to different
+/// character sets on each client.
 #[derive(Clone)]
 pub struct AsciiFrame {
     /// The amount of columns in the frame
     pub w: usize,
     /// The amount of rows in the frame
     pub h: usize,
-    /// processed image pixels, interpreted as characters
-    chars: Vec<char>,
+    /// processed image pixels, stored as character-agnostic indices
+    pixels: Vec<FramePixel>,
 }
 
 impl AsciiFrame {
-    pub fn new(w: usize, h: usize, default_char: char) -> Result<Self, Box<dyn Error>> {
+    /// Create a new frame with the given dimensions
+    ///
+    /// The deprecated `default_char` parameter is ignored and kept for
+    /// backwards compatibility. All pixels are initialized to default (intensity 0).
+    pub fn new(w: usize, h: usize, _default_char: char) -> Result<Self, Box<dyn Error>> {
         if w == 0 || h == 0 {
             return Err("dimensions must be greater than zero".into());
         }
@@ -22,82 +29,97 @@ impl AsciiFrame {
         Ok(Self {
             w,
             h,
-            chars: vec![default_char; w * h],
+            pixels: vec![FramePixel::default(); w * h],
         })
     }
 
-    /// Extract an `AsciiFrame` from an array of bytes
+    /// Extract an `AsciiFrame` from an array of bytes (raw FramePixel data)
     pub fn from_bytes(w: usize, h: usize, bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
         if w == 0 || h == 0 {
             return Err("dimensions must be greater than zero".into());
         }
 
-        // validate UTF-8
-        let text = from_utf8(bytes)?;
         let total = w * h;
-        let mut chars_itr = text.chars();
-        let mut grid = Vec::with_capacity(total);
 
-        // pull EXACTLY w * h code-points, else truncation
-        for _ in 0..total {
-            grid.push(chars_itr.next().ok_or("frame truncation")?);
+        if bytes.len() != total {
+            return Err(format!(
+                "expected {} bytes for {}x{} frame, got {}",
+                total, w, h, bytes.len()
+            ).into());
         }
 
-        // any bytes after expected image?
-        // reject -> sender / receiver size mismatch
-        if chars_itr.next().is_some() {
-            return Err("Extra data after frame".into());
-        }
+        let pixels = bytes.iter().map(|&b| FramePixel::from_byte(b)).collect();
 
-        Ok(Self { w, h, chars: grid })
+        Ok(Self { w, h, pixels })
     }
 
-    /// Set individual characters, with bounds check
-    pub fn set_char(&mut self, x: usize, y: usize, c: char) -> bool {
+    /// Set individual pixel, with bounds check
+    pub fn set_pixel(&mut self, x: usize, y: usize, pixel: FramePixel) -> bool {
         if x >= self.w || y >= self.h {
             return false;
         }
 
         let i = y * self.w + x;
-        if i < self.chars.len() {
-            self.chars[i] = c;
+        if i < self.pixels.len() {
+            self.pixels[i] = pixel;
             true
         } else {
             false
         }
     }
 
-    /// Set range of characters, with bounds check
-    pub fn set_chars(&mut self, data: &[char]) -> bool {
-        if data.len() > self.chars.len() {
+    /// Legacy method: set individual characters (deprecated, kept for compatibility)
+    ///
+    /// This is a no-op in the new implementation. Use set_pixel instead.
+    #[deprecated(note = "Use set_pixel instead")]
+    pub fn set_char(&mut self, x: usize, y: usize, _c: char) -> bool {
+        // for now, just set to default pixel
+        self.set_pixel(x, y, FramePixel::default())
+    }
+
+    /// Set range of pixels, with bounds check
+    pub fn set_pixels(&mut self, data: &[FramePixel]) -> bool {
+        if data.len() > self.pixels.len() {
             return false;
         }
 
-        self.chars[0..data.len()].copy_from_slice(data);
+        self.pixels[0..data.len()].copy_from_slice(data);
         true
     }
 
-    /// Return raw `AsciiFrame` data
+    /// Legacy method: set range of characters (deprecated, kept for compatibility)
+    #[deprecated(note = "Use set_pixels instead")]
+    pub fn set_chars(&mut self, _data: &[char]) -> bool {
+        // no-op in new implementation
+        false
+    }
+
+    /// Return raw pixel data
+    pub fn pixels(&self) -> &[FramePixel] {
+        &self.pixels
+    }
+
+    /// Return raw, mutable pixel data
+    pub fn pixels_mut(&mut self) -> &mut [FramePixel] {
+        &mut self.pixels
+    }
+
+    /// Legacy method: return char data (deprecated, kept for compatibility)
+    ///
+    /// Returns empty slice in new implementation
+    #[deprecated(note = "Use pixels instead")]
     pub fn chars(&self) -> &[char] {
-        &self.chars
+        &[]
     }
 
-    /// Return raw, mutable `AsciiFrame` data
+    /// Legacy method: return mutable char data (deprecated, kept for compatibility)
+    #[deprecated(note = "Use pixels_mut instead")]
     pub fn chars_mut(&mut self) -> &mut [char] {
-        &mut self.chars
+        &mut []
     }
 
-    /// Encode a frame into variable-width UTF-8
+    /// Encode frame as raw bytes (one byte per pixel)
     pub fn bytes(&self) -> Vec<u8> {
-        // worst case scenario - EVERY character uses all 4 code points
-        let mut out = Vec::with_capacity(self.chars().len() * 4);
-
-        for &c in &self.chars {
-            let mut buf = [0u8; 4];
-            let n = c.encode_utf8(&mut buf).len();
-            out.extend_from_slice(&buf[..n]);
-        }
-
-        out
+        self.pixels.iter().map(|p| p.as_byte()).collect()
     }
 }

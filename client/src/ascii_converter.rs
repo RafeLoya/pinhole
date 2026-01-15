@@ -1,6 +1,7 @@
 use crate::edge_detector::EdgeDetector;
 use crate::image_frame::ImageFrame;
 use common::ascii_frame::AsciiFrame;
+use common::frame_pixel::FramePixel;
 use std::error::Error;
 
 /// The coefficients below are derived from Rec. ITU-R BT.601-7.
@@ -16,16 +17,10 @@ pub const B_LUMINANCE: f32 = 0.1140;
 pub struct AsciiConverter {
     /// Identifies edges in given `ImageFrame`s
     edge_detector: EdgeDetector,
-    /// Intensity for `AsciiFrame` "pixels"
-    ascii_intensity: Vec<char>,
-    /// Characters for horizontal line edges (e.g., "-━═")
-    ascii_horizontal_lines: Vec<char>,
-    /// Characters for vertical line edges (e.g., "|│┃")
-    ascii_vertical_lines: Vec<char>,
-    /// Characters for forward diagonal edges (e.g., "/╱⟋")
-    ascii_forward_diagonal: Vec<char>,
-    /// Characters for back diagonal edges (e.g., "\\╲⟍")
-    ascii_back_diagonal: Vec<char>,
+    /// Number of intensity levels (length of intensity character set)
+    intensity_levels: usize,
+    /// Number of edge characters per edge type
+    edge_char_count: usize,
     /// Minimum gradient magnitude for edge detection
     edge_threshold: f32,
     /// Adjustment factor for contrast.
@@ -46,11 +41,8 @@ impl AsciiConverter {
     pub const DEFAULT_BRIGHTNESS: f32 = 0.0;
 
     pub fn new(
-        ascii_intensity: Vec<char>,
-        ascii_horizontal_lines: Vec<char>,
-        ascii_vertical_lines: Vec<char>,
-        ascii_forward_diagonal: Vec<char>,
-        ascii_back_diagonal: Vec<char>,
+        intensity_levels: usize,
+        edge_char_count: usize,
         w: usize,
         h: usize,
         edge_threshold: f32,
@@ -63,11 +55,8 @@ impl AsciiConverter {
 
         Ok(Self {
             edge_detector,
-            ascii_intensity,
-            ascii_horizontal_lines,
-            ascii_vertical_lines,
-            ascii_forward_diagonal,
-            ascii_back_diagonal,
+            intensity_levels,
+            edge_char_count,
             edge_threshold,
             contrast,
             brightness,
@@ -76,11 +65,8 @@ impl AsciiConverter {
 
     pub fn default() -> Result<Self, Box<dyn Error>> {
         Self::new(
-            Self::DEFAULT_ASCII_INTENSITY.chars().collect(),
-            Self::DEFAULT_ASCII_HORIZONTAL_LINES.chars().collect(),
-            Self::DEFAULT_ASCII_VERTICAL_LINES.chars().collect(),
-            Self::DEFAULT_ASCII_FORWARD_DIAGONAL.chars().collect(),
-            Self::DEFAULT_ASCII_BACK_DIAGONAL.chars().collect(),
+            Self::DEFAULT_ASCII_INTENSITY.chars().count(),
+            Self::DEFAULT_ASCII_HORIZONTAL_LINES.chars().count(),
             640,
             480,
             EdgeDetector::DEFAULT_EDGE_THRESHOLD,
@@ -120,11 +106,11 @@ impl AsciiConverter {
                 let e_i = i_y.min(edge_info.h - 1) * edge_info.w + i_x.min(edge_info.w - 1);
 
                 // if an edge's magnitude is greater than the threshold,
-                // assign edge character instead of regular character
+                // assign edge pixel instead of intensity pixel
                 if e_i < edge_info.magnitude.len() && edge_info.magnitude[e_i] > self.edge_threshold
                 {
-                    let c = self.angle_to_edge(edge_info.angle[e_i], edge_info.magnitude[e_i]);
-                    a_frame.set_char(x, y, c);
+                    let pixel = self.angle_to_edge_pixel(edge_info.angle[e_i], edge_info.magnitude[e_i]);
+                    a_frame.set_pixel(x, y, pixel);
                 } else {
                     // no significant edge, retrieve RGB values from
                     // scaled pixel destination in image frame and
@@ -134,12 +120,12 @@ impl AsciiConverter {
                         let rgb_adj = self.adjust_pixel(rgb);
                         let intensity = ImageFrame::calculate_intensity_u8(rgb_adj);
 
-                        let char_i =
-                            (intensity as f32 / 255.0 * self.ascii_intensity.len() as f32) as usize;
+                        let idx =
+                            (intensity as f32 / 255.0 * self.intensity_levels as f32) as usize;
                         // bounds check (e.g. floating point rounding error)
-                        let char_i = char_i.min(self.ascii_intensity.len() - 1);
+                        let idx = idx.min(self.intensity_levels - 1);
 
-                        a_frame.set_char(x, y, self.ascii_intensity[char_i]);
+                        a_frame.set_pixel(x, y, FramePixel::intensity(idx as u8));
                     }
                 }
             }
@@ -166,26 +152,26 @@ impl AsciiConverter {
     }
 
     /// Normalizes an angle to 0-180 degrees, then maps the angle to an
-    /// angle character based on magnitude and angle degree
-    fn angle_to_edge(&self, angle: f32, magnitude: f32) -> char {
+    /// edge pixel based on magnitude and angle degree
+    fn angle_to_edge_pixel(&self, angle: f32, magnitude: f32) -> FramePixel {
         // normalizing to 0-180
         let angle_d = ((angle.to_degrees() % 180.0) + 180.0) % 180.0;
 
-        let char_i = ((magnitude / 255.0) * (self.ascii_vertical_lines.len() as f32))
-            .min((self.ascii_vertical_lines.len() - 1) as f32) as usize;
+        let idx = ((magnitude / 255.0) * (self.edge_char_count as f32))
+            .min((self.edge_char_count - 1) as f32) as u8;
 
         if (angle_d >= 0.0 && angle_d < 22.5) || (angle_d >= 157.5 && angle_d < 180.0) {
-            // Gradient ~0° (horizontal gradient) → vertical edge
-            self.ascii_vertical_lines[char_i.min(self.ascii_vertical_lines.len() - 1)]
+            // gradient ~0 (horizontal gradient) -> vertical edge
+            FramePixel::vertical_edge(idx)
         } else if (angle_d >= 22.5) && (angle_d < 67.5) {
-            // Gradient ~45° → forward diagonal edge
-            self.ascii_forward_diagonal[char_i.min(self.ascii_forward_diagonal.len() - 1)]
+            // gradient ~45 -> forward diagonal edge
+            FramePixel::forward_diagonal(idx)
         } else if (angle_d >= 67.5) && (angle_d < 112.5) {
-            // Gradient ~90° (vertical gradient) → horizontal edge
-            self.ascii_horizontal_lines[char_i.min(self.ascii_horizontal_lines.len() - 1)]
+            // gradient ~90 (vertical gradient) -> horizontal edge
+            FramePixel::horizontal_edge(idx)
         } else {
-            // Gradient ~135° → back diagonal edge
-            self.ascii_back_diagonal[char_i.min(self.ascii_back_diagonal.len() - 1)]
+            // gradient ~135 -> back diagonal edge
+            FramePixel::back_diagonal(idx)
         }
     }
 }
