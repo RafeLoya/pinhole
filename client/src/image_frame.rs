@@ -1,4 +1,4 @@
-use crate::ascii_converter::{B_LUMINANCE, G_LUMINANCE, R_LUMINANCE};
+use crate::text_converter::{B_LUMINANCE, G_LUMINANCE, R_LUMINANCE};
 use std::error::Error;
 
 /// Initial frame received from webcam feed

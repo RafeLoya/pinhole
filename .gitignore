@@ -28,3 +28,5 @@ Cargo.lock
 .DS_Store
 .DS_Store?
 ._*
+
+test_cfgs/

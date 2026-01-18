@@ -1,7 +1,50 @@
+use common::frame_pixel::{MAX_EDGE_CHARS, MAX_INTENSITY_CHARS};
+use config as config_crate; // external config crate for TOML loading
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::path::Path;
-use config as config_crate;  // External config crate for TOML loading
+use crate::terminal::TerminalOverrides;
+
+/// Predefined dimension presets
+#[derive(Debug, Clone, Copy)]
+pub enum DimensionPreset {
+    Small,   // 80x24 - 1937 bytes (UDP safe)
+    Medium,  // 120x40 - 4817 bytes (UDP safe)
+    Large,   // 160x50 - 8017 bytes (may fragment)
+    XLarge,  // 200x60 - 12017 bytes (requires TCP or chunking)
+}
+
+impl DimensionPreset {
+    pub fn dimensions(&self) -> (usize, usize) {
+        match self {
+            DimensionPreset::Small => (80, 24),
+            DimensionPreset::Medium => (120, 40),
+            DimensionPreset::Large => (160, 50),
+            DimensionPreset::XLarge => (200, 60),
+        }
+    }
+
+    /// Returns approximate full frame size in bytes
+    pub fn frame_size(&self) -> usize {
+        let (w, h) = self.dimensions();
+        17 + (w * h) // 17 byte header + width * height pixels
+    }
+
+    /// Returns true if this preset is safe for UDP without fragmentation
+    pub fn is_udp_safe(&self) -> bool {
+        self.frame_size() <= 1400
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "small" | "s" => Some(DimensionPreset::Small),
+            "medium" | "m" => Some(DimensionPreset::Medium),
+            "large" | "l" => Some(DimensionPreset::Large),
+            "xlarge" | "xl" => Some(DimensionPreset::XLarge),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PinholeConfig {
@@ -15,6 +58,8 @@ pub struct PinholeConfig {
     pub performance: PerformanceSettings,
     #[serde(default)]
     pub network: NetworkSettings,
+    #[serde(default)]
+    pub terminal: TerminalOverrides
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -274,6 +319,7 @@ impl Default for PinholeConfig {
             image_processing: ImageProcessingSettings::default(),
             performance: PerformanceSettings::default(),
             network: NetworkSettings::default(),
+            terminal: TerminalOverrides::default(),
         }
     }
 }
@@ -369,6 +415,68 @@ impl Default for AsciiChars {
     }
 }
 
+impl AsciiChars {
+    /// Validate that character counts are within allowed limits
+    pub fn validate(&self) -> Result<(), String> {
+        let intensity_count = self.intensity.chars().count();
+        if intensity_count == 0 {
+            return Err("intensity characters cannot be empty".into());
+        }
+        if intensity_count > MAX_INTENSITY_CHARS {
+            return Err(format!(
+                "intensity characters ({}) exceed maximum allowed ({})",
+                intensity_count, MAX_INTENSITY_CHARS
+            ));
+        }
+
+        let horizontal_count = self.horizontal_lines.chars().count();
+        if horizontal_count == 0 {
+            return Err("horizontal line characters cannot be empty".into());
+        }
+        if horizontal_count > MAX_EDGE_CHARS {
+            return Err(format!(
+                "horizontal line characters ({}) exceed maximum allowed ({})",
+                horizontal_count, MAX_EDGE_CHARS
+            ));
+        }
+
+        let vertical_count = self.vertical_lines.chars().count();
+        if vertical_count == 0 {
+            return Err("vertical line characters cannot be empty".into());
+        }
+        if vertical_count > MAX_EDGE_CHARS {
+            return Err(format!(
+                "vertical line characters ({}) exceed maximum allowed ({})",
+                vertical_count, MAX_EDGE_CHARS
+            ));
+        }
+
+        let forward_count = self.forward_diagonal.chars().count();
+        if forward_count == 0 {
+            return Err("forward diagonal characters cannot be empty".into());
+        }
+        if forward_count > MAX_EDGE_CHARS {
+            return Err(format!(
+                "forward diagonal characters ({}) exceed maximum allowed ({})",
+                forward_count, MAX_EDGE_CHARS
+            ));
+        }
+
+        let back_count = self.back_diagonal.chars().count();
+        if back_count == 0 {
+            return Err("back diagonal characters cannot be empty".into());
+        }
+        if back_count > MAX_EDGE_CHARS {
+            return Err(format!(
+                "back diagonal characters ({}) exceed maximum allowed ({})",
+                back_count, MAX_EDGE_CHARS
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for ImageProcessingSettings {
     fn default() -> Self {
         Self {
@@ -405,7 +513,12 @@ impl PinholeConfig {
             .add_source(config_crate::File::from(path.as_ref()))
             .build()?;
 
-        Ok(settings.try_deserialize()?)
+        let config: Self = settings.try_deserialize()?;
+
+        // validate ASCII character counts
+        config.ascii.chars.validate()?;
+
+        Ok(config)
     }
 
     /// Load configuration from a TOML file with optional fallback to defaults

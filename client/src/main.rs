@@ -1,9 +1,10 @@
 extern crate alloc;
 
-mod ascii_converter;
-mod ascii_renderer;
+mod text_converter;
+mod text_renderer;
 mod camera;
 mod client;
+mod terminal;
 mod config;
 mod edge_detector;
 mod ffmpeg;
@@ -14,11 +15,35 @@ use crate::client::Client;
 use crate::config::PinholeConfig;
 use crate::mock_frame_generator::PatternType;
 use clap::{Parser, ValueEnum};
+use crossterm::{
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use rand::Rng;
 use std::error::Error;
+use std::io::stdout;
 use std::path::PathBuf;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
+use terminal::TerminalInfo;
+
+/// Guard that restores terminal state on drop.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
@@ -40,15 +65,15 @@ impl From<TestPattern> for PatternType {
 /// If wanting to test locally with your webcam, enter the following:
 ///
 /// ```bash
-/// # Solo mode (local preview, no server connection)
-/// cargo run --bin pinhole -- --solo
+/// # solo mode (local preview, no server connection)
+/// cargo run --release --bin pinhole -- --solo
 /// ```
 ///
 /// To connect to a session with a live server, enter the following:
 ///
 /// ```bash
-/// # Network mode
-/// cargo run --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
+/// # network mode
+/// cargo run --release --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
 /// ```
 ///
 /// where:
@@ -56,8 +81,12 @@ impl From<TestPattern> for PatternType {
 /// - `SESSION_ID` can be any string (for now)
 /// - `PATTERN_TYPE` can be either "`checkerboard`" or "`moving-line`"
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, disable_help_flag = true)]
 struct Args {
+    /// Print help information
+    #[arg(long)]
+    help: bool,
+
     /// Configuration file path
     #[arg(short = 'c', long, default_value = "pinhole.toml")]
     config: PathBuf,
@@ -81,11 +110,30 @@ struct Args {
     /// Test pattern (if not using a camera)
     #[arg(short = 'p', long)]
     test_pattern: Option<TestPattern>,
+
+    /// Dimension preset (small, medium, large, xlarge)
+    #[arg(long)]
+    preset: Option<String>,
+
+    /// Render window width (overrides config and preset)
+    #[arg(short = 'w', long)]
+    width: Option<usize>,
+
+    /// Render window height (overrides config and preset)
+    #[arg(short = 'h', long)]
+    height: Option<usize>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
+
+    // handle manual help flag
+    if args.help {
+        use clap::CommandFactory;
+        Args::command().print_help()?;
+        return Ok(());
+    }
 
     // === SHUTDOWN HANDLER =======================================================================
     // create cancellation token for graceful shutdown coordination
@@ -94,18 +142,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // CTRL+C signal handler
     tokio::spawn(async move {
-        match signal::ctrl_c().await {
-            Ok(()) => {
-                println!("Shutdown signal received (Ctrl+C), cleaning up...");
-                cancel_token_clone.cancel();
-            }
-            Err(e) => {
-                eprintln!("Error listening for Ctrl+C: {}", e);
-            }
+        if signal::ctrl_c().await.is_ok() {
+            cancel_token_clone.cancel();
         }
     });
 
-    // === CONFIGURATION FILE =====================================================================
+    // === CONFIGURATION ==========================================================================
     // load configuration from file or use defaults
     let mut config = if args.config.exists() {
         println!("Loading config from: {}", args.config.display());
@@ -117,6 +159,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         PinholeConfig::default()
     };
+    
+    // TODO! make use of terminal info for config
+    let _term_info = TerminalInfo::detect(config.terminal.clone())?;
 
     // === CLI ARGUMENTS ==========================================================================
     // CLI arguments override config file settings
@@ -137,11 +182,61 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("using test pattern: {:?}", args.test_pattern);
     }
 
+    // apply dimension overrides (preset first, then explicit width/height)
+    if let Some(preset_str) = &args.preset {
+        if let Some(preset) = config::DimensionPreset::from_str(preset_str) {
+            let (w, h) = preset.dimensions();
+            config.ascii.width = w;
+            config.ascii.height = h;
+            println!("Using dimension preset '{}': {}x{}", preset_str, w, h);
+
+            // warn if not UDP safe
+            if !preset.is_udp_safe() {
+                eprintln!(
+                    "WARNING: Frame size ~{} bytes exceeds safe UDP limit (1400 bytes)",
+                    preset.frame_size()
+                );
+                eprintln!("    Expect packet loss and rendering issues over UDP.");
+                eprintln!("    Consider using 'small' or 'medium' presets for reliable streaming.");
+            }
+        } else {
+            eprintln!("Warning: Unknown preset '{}', ignoring", preset_str);
+        }
+    }
+
+    if let Some(width) = args.width {
+        config.ascii.width = width;
+        println!("ASCII width override: {}", width);
+    }
+
+    if let Some(height) = args.height {
+        config.ascii.height = height;
+        println!("ASCII height override: {}", height);
+    }
+
+    // warn about custom dimensions if they're too large
+    if (args.width.is_some() || args.height.is_some()) && args.preset.is_none() {
+        let frame_size = 17 + (config.ascii.width * config.ascii.height);
+        if frame_size > 1400 {
+            eprintln!(
+                "WARNING: Frame size ~{} bytes ({}x{}) exceeds safe UDP limit (1400 bytes)",
+                frame_size, config.ascii.width, config.ascii.height
+            );
+            eprintln!("         Expect packet loss and rendering issues over UDP.");
+            eprintln!("         Keep dimensions under ~37x37 for reliable streaming.");
+        }
+    }
+
     // === SOLO (PREVIEW) MODE ====================================================================
     // local preview without network connection
     if args.solo {
         println!("Running in solo mode (local preview only)");
-        println!("Press Ctrl+C to exit");
+        println!("Press 'q' to quit, 'b' to toggle border, 'd' to toggle debug");
+        println!("Starting in 1 second...");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // enter TUI mode (raw mode + alternate screen)
+        let _terminal_guard = TerminalGuard::new()?;
 
         let client = Client::new(
             String::new(), // no TCP addr needed
@@ -155,11 +250,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             result = client.run_solo() => {
                 if let Err(e) = result {
+                    // drop guard first to restore terminal before printing error
+                    drop(_terminal_guard);
                     eprintln!("Error in solo mode: {}", e);
                 }
             }
             _ = cancel_token.cancelled() => {
-                println!("Solo mode shutdown complete");
+                // terminal guard will restore on drop
             }
         }
     } else {
@@ -173,7 +270,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             config.network.session_id.clone()
         };
 
-        println!("connection to session: {}", session_id);
+        println!("Connecting to session: {}", session_id);
+        println!("Press 'q' to quit, 'b' to toggle border, 'd' to toggle debug");
+        println!("Starting in 1 second...");
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // enter TUI mode (raw mode + alternate screen)
+        let _terminal_guard = TerminalGuard::new()?;
 
         let client = Client::new(
             config.network.tcp_addr.clone(),
@@ -187,11 +290,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             result = client.run() => {
                 if let Err(e) = result {
+                    // drop guard first to restore terminal before printing error
+                    drop(_terminal_guard);
                     eprintln!("Error in network mode: {}", e);
                 }
             }
             _ = cancel_token.cancelled() => {
-                println!("Network mode shutdown complete");
+                // terminal guard will restore on drop
             }
         }
     }
