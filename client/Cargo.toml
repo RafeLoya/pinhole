@@ -28,7 +28,7 @@ anyhow = "1.0.100"
 criterion = "0.8.1"
 
 [[bench]]
-name = "ascii_rendering"
+name = "text_rendering"
 harness = false
 
 [lib]

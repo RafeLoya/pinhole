@@ -1,7 +1,7 @@
 // library exports for testing and benchmarking
 
-pub mod ascii_renderer;
-pub mod ascii_converter;
+pub mod text_renderer;
+pub mod text_converter;
 pub mod edge_detector;
 pub mod image_frame;
 pub mod camera;

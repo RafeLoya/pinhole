@@ -1,19 +1,19 @@
 use crate::edge_detector::EdgeDetector;
 use crate::image_frame::ImageFrame;
-use common::ascii_frame::AsciiFrame;
+use common::text_frame::TextFrame;
 use common::frame_pixel::FramePixel;
 use std::error::Error;
 
-/// The coefficients below are derived from Rec. ITU-R BT.601-7.
-/// In the specification, these luminance coefficients represent
-/// how much they influence / contribute to the human eye's
-/// perception of brightness.
+// The coefficients below are derived from Rec. ITU-R BT.601-7.
+// In the specification, these luminance coefficients represent
+// how much they influence / contribute to the human eye's
+// perception of brightness.
 
 pub const R_LUMINANCE: f32 = 0.2989;
 pub const G_LUMINANCE: f32 = 0.5870;
 pub const B_LUMINANCE: f32 = 0.1140;
 
-/// Intermediary translator to transform an `ImageFrame` into an `AsciiFrame`
+/// Intermediary translator to transform an `ImageFrame` into a `TextFrame`
 pub struct AsciiConverter {
     /// Identifies edges in given `ImageFrame`s
     edge_detector: EdgeDetector,
@@ -82,11 +82,11 @@ impl AsciiConverter {
     ///   ASCII characters
     ///
     /// The function also handles scaling from the original `ImageFrame`'s
-    /// dimensions to the target `AsciiFrame`'s dimensions
+    /// dimensions to the target `TextFrame`'s dimensions
     pub fn convert(
         &self,
         i_frame: &ImageFrame,
-        a_frame: &mut AsciiFrame,
+        a_frame: &mut TextFrame,
     ) -> Result<(), Box<dyn Error>> {
         // submit the original image to the edge detector
         self.edge_detector.submit_frame(i_frame)?;

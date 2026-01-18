@@ -1,4 +1,4 @@
-use common::ascii_frame::AsciiFrame;
+use common::text_frame::TextFrame;
 use common::frame_encoding::{FrameType, PixelChange};
 use common::frame_pixel::FramePixel;
 use std::error::Error;
@@ -119,13 +119,13 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 /// Outputs ASCII frame data to `stdout`
-pub struct AsciiRenderer {
+pub struct TextRenderer {
     /// Used to reduce terminal flickering and
     /// (to later be used) for changing window sizes
     prev_frame: Vec<FramePixel>,
-    /// Width of previous `AsciiFrame`
+    /// Width of previous `TextFrame`
     prev_w: usize,
-    /// Height of previous `AsciiFrame`
+    /// Height of previous `TextFrame`
     prev_h: usize,
     /// Reusable buffer for batched terminal output
     output_buffer: Vec<u8>,
@@ -136,14 +136,14 @@ pub struct AsciiRenderer {
     forward_diagonal_chars: Vec<char>,
     back_diagonal_chars: Vec<char>,
     /// Current assembled frame (for applying diffs)
-    current_frame: Option<AsciiFrame>,
+    current_frame: Option<TextFrame>,
     /// TUI layout configuration
     layout: TuiLayout,
     /// Whether border has been rendered (avoids redundant draws)
     border_rendered: bool,
 }
 
-impl AsciiRenderer {
+impl TextRenderer {
     /// Create a new renderer with character mappings from configuration.
     pub fn new_with_chars(
         intensity_chars: Vec<char>,
@@ -155,7 +155,7 @@ impl AsciiRenderer {
         Self::clear_screen()?;
         Self::hide_cursor()?;
 
-        Ok(AsciiRenderer {
+        Ok(TextRenderer {
             prev_frame: Vec::new(),
             prev_w: 0,
             prev_h: 0,
@@ -186,7 +186,7 @@ impl AsciiRenderer {
         Self::clear_screen()?;
         Self::hide_cursor()?;
 
-        Ok(AsciiRenderer {
+        Ok(TextRenderer {
             prev_frame: Vec::new(),
             prev_w: 0,
             prev_h: 0,
@@ -369,7 +369,7 @@ impl AsciiRenderer {
     ///
     /// Separate function for benchmarking the rendering logic without I/O overhead.
     /// Returns the size of the prepared buffer.
-    pub fn prepare_buffer(&mut self, frame: &AsciiFrame) -> Result<usize, Box<dyn Error>> {
+    pub fn prepare_buffer(&mut self, frame: &TextFrame) -> Result<usize, Box<dyn Error>> {
         // did frame size change?
         if frame.w != self.prev_w
             || frame.h != self.prev_h
@@ -435,10 +435,10 @@ impl AsciiRenderer {
         Ok(self.output_buffer.len())
     }
 
-    /// With an `AsciiFrame`, output any ASCII characters that changed from
+    /// With an `TextFrame`, output any ASCII characters that changed from
     /// `prev_frame` to the screen, and record these changes into
     /// `prev_frame`
-    pub fn render(&mut self, frame: &AsciiFrame) -> Result<(), Box<dyn Error>> {
+    pub fn render(&mut self, frame: &TextFrame) -> Result<(), Box<dyn Error>> {
         // check if frame size changed and clear screen if needed
         let size_changed = frame.w != self.prev_w
             || frame.h != self.prev_h
@@ -466,8 +466,8 @@ impl AsciiRenderer {
         Ok(())
     }
 
-    /// Deserializes datagram into an `AsciiFrame`, supporting both Full and Diff frames
-    pub fn process_datagram(&mut self, datagram: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
+    /// Deserializes datagram into an `TextFrame`, supporting both Full and Diff frames
+    pub fn process_datagram(&mut self, datagram: &[u8]) -> Result<TextFrame, Box<dyn Error>> {
         if datagram.is_empty() {
             return Err("empty datagram".into());
         }
@@ -492,7 +492,7 @@ impl AsciiRenderer {
     }
 
     /// Process a full frame
-    fn process_full_frame(&mut self, data: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
+    fn process_full_frame(&mut self, data: &[u8]) -> Result<TextFrame, Box<dyn Error>> {
         if data.len() < 16 {
             return Err("full frame too small".into());
         }
@@ -513,7 +513,7 @@ impl AsciiRenderer {
             ).into());
         }
 
-        let frame = AsciiFrame::from_bytes(w, h, &data[16..])?;
+        let frame = TextFrame::from_bytes(w, h, &data[16..])?;
 
         // if dimensions changed, clear the screen to avoid artifacts
         if let Some(ref curr) = self.current_frame {
@@ -527,7 +527,7 @@ impl AsciiRenderer {
     }
 
     /// Process a diff frame and apply changes to current frame
-    fn process_diff_frame(&mut self, data: &[u8]) -> Result<AsciiFrame, Box<dyn Error>> {
+    fn process_diff_frame(&mut self, data: &[u8]) -> Result<TextFrame, Box<dyn Error>> {
         if data.len() < 4 {
             return Err("diff frame too small".into());
         }
@@ -568,10 +568,10 @@ impl AsciiRenderer {
         Ok(current.clone())
     }
 
-    /// Serializes an `AsciiFrame` into bytes (full frame, no compression)
+    /// Serializes an `TextFrame` into bytes (full frame, no compression)
     ///
     /// Deprecated: Use FrameSerializer for diff-based compression
-    pub fn serialize_frame(frame: &AsciiFrame) -> Vec<u8> {
+    pub fn serialize_frame(frame: &TextFrame) -> Vec<u8> {
         // type (1 byte) + width (8 bytes) + height (8 bytes) + pixel data
         let mut bytes = Vec::with_capacity(17 + frame.w * frame.h);
         bytes.push(FrameType::Full.as_byte());
@@ -598,7 +598,7 @@ impl AsciiRenderer {
     }
 }
 
-impl Drop for AsciiRenderer {
+impl Drop for TextRenderer {
     fn drop(&mut self) {
         // restore cursor visibility when renderer is dropped
         // note: screen clearing is handled by TerminalGuard's LeaveAlternateScreen
@@ -609,7 +609,7 @@ impl Drop for AsciiRenderer {
 /// Stateful frame serializer that supports diff-based compression
 pub struct FrameSerializer {
     /// Previous frame sent (for computing diffs)
-    prev_frame: Option<AsciiFrame>,
+    prev_frame: Option<TextFrame>,
     /// Reusable buffer for encoding changes
     changes_buffer: Vec<PixelChange>,
     /// Stats tracking
@@ -634,7 +634,7 @@ impl FrameSerializer {
     /// Serialize a frame with diff compression
     ///
     /// First frame is always Full. Subsequent frames are Diff if changes < 50% of pixels.
-    pub fn serialize(&mut self, frame: &AsciiFrame) -> Vec<u8> {
+    pub fn serialize(&mut self, frame: &TextFrame) -> Vec<u8> {
         // first frame or dimension changed? send full frame
         let send_full = self.prev_frame.as_ref().map_or(true, |prev| {
             prev.w != frame.w || prev.h != frame.h
@@ -674,7 +674,7 @@ impl FrameSerializer {
     }
 
     /// Serialize as full frame
-    fn serialize_full(&mut self, frame: &AsciiFrame) -> Vec<u8> {
+    fn serialize_full(&mut self, frame: &TextFrame) -> Vec<u8> {
         // type (1 byte) + width (8 bytes) + height (8 bytes) + all pixels
         let mut bytes = Vec::with_capacity(17 + frame.w * frame.h);
         bytes.push(FrameType::Full.as_byte());
@@ -728,8 +728,8 @@ mod tests {
 
     #[test]
     fn test_render_single_pixel() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(5, 3, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(5, 3, ' ').unwrap();
 
         // set a single pixel with intensity
         let pixel = FramePixel::intensity(5);
@@ -745,8 +745,8 @@ mod tests {
 
     #[test]
     fn test_render_no_changes() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let frame = AsciiFrame::new(5, 3, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let frame = TextFrame::new(5, 3, ' ').unwrap();
 
         // render once
         renderer.render(&frame).unwrap();
@@ -759,8 +759,8 @@ mod tests {
 
     #[test]
     fn test_render_multiple_changes() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(10, 5, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(10, 5, ' ').unwrap();
 
         // set multiple pixels with different intensities
         let pixel_a = FramePixel::intensity(1);
@@ -781,8 +781,8 @@ mod tests {
 
     #[test]
     fn test_render_edge_characters() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(5, 3, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(5, 3, ' ').unwrap();
 
         // test with various edge types
         frame.pixels_mut()[0] = FramePixel::horizontal_edge(0);
@@ -799,15 +799,15 @@ mod tests {
 
     #[test]
     fn test_render_frame_size_change() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let frame1 = AsciiFrame::new(10, 5, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let frame1 = TextFrame::new(10, 5, ' ').unwrap();
 
         renderer.render(&frame1).unwrap();
         assert_eq!(renderer.prev_w, 10);
         assert_eq!(renderer.prev_h, 5);
 
         // change frame size
-        let frame2 = AsciiFrame::new(20, 10, ' ').unwrap();
+        let frame2 = TextFrame::new(20, 10, ' ').unwrap();
         renderer.render(&frame2).unwrap();
 
         assert_eq!(renderer.prev_w, 20);
@@ -817,8 +817,8 @@ mod tests {
 
     #[test]
     fn test_output_buffer_reuse() {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(10, 5, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(10, 5, ' ').unwrap();
 
         frame.pixels_mut()[0] = FramePixel::intensity(5);
         renderer.render(&frame).unwrap();

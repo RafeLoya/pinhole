@@ -1,7 +1,7 @@
 extern crate alloc;
 
-mod ascii_converter;
-mod ascii_renderer;
+mod text_converter;
+mod text_renderer;
 mod camera;
 mod client;
 mod terminal;
@@ -72,7 +72,7 @@ impl From<TestPattern> for PatternType {
 /// To connect to a session with a live server, enter the following:
 ///
 /// ```bash
-/// # Network mode
+/// # network mode
 /// cargo run --release --bin pinhole -- -t <TCP_PORT> -u <UDP_PORT> -s <SESSION_ID> -p <PATTERN_TYPE>
 /// ```
 ///

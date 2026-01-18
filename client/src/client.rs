@@ -1,10 +1,10 @@
-use crate::ascii_converter::AsciiConverter;
-use crate::ascii_renderer::{AsciiRenderer, FrameSerializer, PerformanceStats, TuiLayout};
+use crate::text_converter::AsciiConverter;
+use crate::text_renderer::{TextRenderer, FrameSerializer, PerformanceStats, TuiLayout};
 use crate::camera::Camera;
 use crate::config::PinholeConfig;
 use crate::image_frame::ImageFrame;
 use crate::mock_frame_generator::{MockFrameGenerator, PatternType};
-use common::ascii_frame::AsciiFrame;
+use common::text_frame::TextFrame;
 use common::MAX_UDP_PACKET_SIZE;
 use crossterm::event::{Event, EventStream, KeyCode, KeyModifiers};
 use futures::StreamExt;
@@ -178,7 +178,7 @@ impl Client {
 
         // println!("joined session: {}", self.session_id);
 
-        let (frame_tx, _) = broadcast::channel::<AsciiFrame>(self.config.performance.frame_buffer);
+        let (frame_tx, _) = broadcast::channel::<TextFrame>(self.config.performance.frame_buffer);
 
         // === TCP SESSION CONTROL ================================================================
         // reads control messages from server, updating local state about
@@ -243,7 +243,7 @@ impl Client {
         
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
-            let mut renderer = AsciiRenderer::new_with_chars(
+            let mut renderer = TextRenderer::new_with_chars(
                 intensity_chars,
                 horizontal_chars,
                 vertical_chars,
@@ -318,7 +318,7 @@ impl Client {
         });
 
         // === FRAME CAPTURE, ENCODING, AND SENDING ===============================================
-        // receive AsciiFrame, then serialize and send to peer via UDP if present.
+        // receive TextFrame, then serialize and send to peer via UDP if present.
         
         let send_conn_rx = self.conn_flag_rx.clone();
         let mut send_peer_rx = self.peer_flag_rx.clone();
@@ -384,7 +384,7 @@ impl Client {
                     }
                 }
 
-                // TODO: look at notes "Current Caveats of AsciiFrame"
+                // TODO: look at notes "Current Caveats of TextFrame"
             }
         });
 
@@ -413,7 +413,7 @@ impl Client {
 
             let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
             let mut ascii_frame =
-                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
+                TextFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().count(),
@@ -492,7 +492,7 @@ impl Client {
                 pattern.clone(),
             )?;
 
-            let mut renderer = AsciiRenderer::new_with_layout(
+            let mut renderer = TextRenderer::new_with_layout(
                 self.config.ascii.chars.intensity.chars().collect(),
                 self.config.ascii.chars.horizontal_lines.chars().collect(),
                 self.config.ascii.chars.vertical_lines.chars().collect(),
@@ -566,7 +566,7 @@ impl Client {
 
             let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
             let mut ascii_frame =
-                AsciiFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
+                TextFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
 
             let converter = AsciiConverter::new(
                 self.config.ascii.chars.intensity.chars().count(),
@@ -578,7 +578,7 @@ impl Client {
                 self.config.image_processing.brightness,
             )?;
 
-            let mut renderer = AsciiRenderer::new_with_layout(
+            let mut renderer = TextRenderer::new_with_layout(
                 self.config.ascii.chars.intensity.chars().collect(),
                 self.config.ascii.chars.horizontal_lines.chars().collect(),
                 self.config.ascii.chars.vertical_lines.chars().collect(),

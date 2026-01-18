@@ -1,4 +1,4 @@
-use common::ascii_frame::AsciiFrame;
+use common::text_frame::TextFrame;
 use common::frame_pixel::FramePixel;
 use std::error::Error;
 use std::time::{Duration, Instant};
@@ -51,14 +51,14 @@ impl MockFrameGenerator {
     }
 
     /// Generate a mock frame
-    pub fn generate_frame(&mut self) -> Result<AsciiFrame, Box<dyn Error>> {
+    pub fn generate_frame(&mut self) -> Result<TextFrame, Box<dyn Error>> {
         let elapsed = self.last_frame_time.elapsed();
         if elapsed < self.frame_delay {
             std::thread::sleep(self.frame_delay - elapsed);
         }
         self.last_frame_time = Instant::now();
 
-        let mut frame = AsciiFrame::new(self.w, self.h, ' ')?;
+        let mut frame = TextFrame::new(self.w, self.h, ' ')?;
 
         match self.pattern_type {
             PatternType::Checkerboard => self.generate_checkerboard(&mut frame),
@@ -71,7 +71,7 @@ impl MockFrameGenerator {
     }
 
     /// Create a checkerboard pattern in the mock frame
-    fn generate_checkerboard(&self, frame: &mut AsciiFrame) {
+    fn generate_checkerboard(&self, frame: &mut TextFrame) {
         // alternate between intensity indices 3 and 7
         let indices = [3, 7];
 
@@ -87,7 +87,7 @@ impl MockFrameGenerator {
     }
 
     /// Create a moving line pattern in the mock frame
-    fn generate_moving_line(&self, frame: &mut AsciiFrame) {
+    fn generate_moving_line(&self, frame: &mut TextFrame) {
         let line_pos = self.frame_counter % frame.h;
 
         for y in 0..self.h {

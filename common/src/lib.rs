@@ -1,4 +1,4 @@
-pub mod ascii_frame;
+pub mod text_frame;
 pub mod frame_encoding;
 pub mod frame_pixel;
 pub mod logger;

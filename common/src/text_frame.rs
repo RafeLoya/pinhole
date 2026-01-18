@@ -7,7 +7,7 @@ use std::error::Error;
 /// Stores character-agnostic pixel data that can be mapped to different
 /// character sets on each client.
 #[derive(Clone)]
-pub struct AsciiFrame {
+pub struct TextFrame {
     /// The amount of columns in the frame
     pub w: usize,
     /// The amount of rows in the frame
@@ -16,7 +16,7 @@ pub struct AsciiFrame {
     pixels: Vec<FramePixel>,
 }
 
-impl AsciiFrame {
+impl TextFrame {
     /// Create a new frame with the given dimensions
     ///
     /// The deprecated `default_char` parameter is ignored and kept for
@@ -33,7 +33,7 @@ impl AsciiFrame {
         })
     }
 
-    /// Extract an `AsciiFrame` from an array of bytes (raw FramePixel data)
+    /// Extract an `TextFrame` from an array of bytes (raw FramePixel data)
     pub fn from_bytes(w: usize, h: usize, bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
         if w == 0 || h == 0 {
             return Err("dimensions must be greater than zero".into());

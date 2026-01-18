@@ -74,7 +74,7 @@ impl ProcessingBuffers {
 }
 
 /// Thread that processes given `ImageFrames` using our edge detection methods
-/// and returns that information to apply it to the final `AsciiFrame`
+/// and returns that information to apply it to the final `TextFrame`
 pub struct EdgeDetector {
     /// The edge magnitudes and angles of the latest processed `ImageFrame`.
     /// Uses atomic swap for lock-free reads.

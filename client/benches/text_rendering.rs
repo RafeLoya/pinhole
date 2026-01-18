@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use common::ascii_frame::AsciiFrame;
-use pinhole::ascii_renderer::AsciiRenderer;
+use common::text_frame::TextFrame;
+use pinhole::text_renderer::TextRenderer;
 
 
 fn bench_render_various_sizes(c: &mut Criterion) {
@@ -20,8 +20,8 @@ fn bench_render_various_sizes(c: &mut Criterion) {
             BenchmarkId::new("full_frame", format!("{}x{}", width, height)),
             &(width, height),
             |b, &(w, h)| {
-                let mut renderer = AsciiRenderer::new().unwrap();
-                let mut frame = AsciiFrame::new(w, h, ' ').unwrap();
+                let mut renderer = TextRenderer::new().unwrap();
+                let mut frame = TextFrame::new(w, h, ' ').unwrap();
 
                 // Fill entire frame with characters (worst case)
                 for i in 0..(w * h) {
@@ -44,9 +44,9 @@ fn bench_render_various_sizes(c: &mut Criterion) {
             BenchmarkId::new("50%_changes", format!("{}x{}", width, height)),
             &(width, height),
             |b, &(w, h)| {
-                let mut renderer = AsciiRenderer::new().unwrap();
-                let mut frame1 = AsciiFrame::new(w, h, ' ').unwrap();
-                let mut frame2 = AsciiFrame::new(w, h, ' ').unwrap();
+                let mut renderer = TextRenderer::new().unwrap();
+                let mut frame1 = TextFrame::new(w, h, ' ').unwrap();
+                let mut frame2 = TextFrame::new(w, h, ' ').unwrap();
 
                 // Fill 50% of chars
                 for i in (0..(w * h)).step_by(2) {
@@ -66,9 +66,9 @@ fn bench_render_various_sizes(c: &mut Criterion) {
             BenchmarkId::new("10%_changes", format!("{}x{}", width, height)),
             &(width, height),
             |b, &(w, h)| {
-                let mut renderer = AsciiRenderer::new().unwrap();
-                let mut frame1 = AsciiFrame::new(w, h, ' ').unwrap();
-                let mut frame2 = AsciiFrame::new(w, h, ' ').unwrap();
+                let mut renderer = TextRenderer::new().unwrap();
+                let mut frame1 = TextFrame::new(w, h, ' ').unwrap();
+                let mut frame2 = TextFrame::new(w, h, ' ').unwrap();
 
                 // Fill 10% of chars
                 for i in (0..(w * h)).step_by(10) {
@@ -92,8 +92,8 @@ fn bench_utf8_encoding(c: &mut Criterion) {
     let mut group = c.benchmark_group("utf8_encoding");
 
     group.bench_function("ascii_only", |b| {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(120, 40, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(120, 40, ' ').unwrap();
 
         // Fill with ASCII characters (1 byte each)
         for ch in frame.chars_mut() {
@@ -106,8 +106,8 @@ fn bench_utf8_encoding(c: &mut Criterion) {
     });
 
     group.bench_function("box_drawing_chars", |b| {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(120, 40, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(120, 40, ' ').unwrap();
 
         // Fill with box drawing characters (3 bytes each in UTF-8)
         for ch in frame.chars_mut() {
@@ -120,8 +120,8 @@ fn bench_utf8_encoding(c: &mut Criterion) {
     });
 
     group.bench_function("mixed_chars", |b| {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame = AsciiFrame::new(120, 40, ' ').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame = TextFrame::new(120, 40, ' ').unwrap();
 
         // Mix of ASCII and multi-byte UTF-8
         for (i, ch) in frame.chars_mut().iter_mut().enumerate() {
@@ -146,9 +146,9 @@ fn bench_buffer_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("buffer_operations");
 
     group.bench_function("buffer_clear_and_reuse", |b| {
-        let mut renderer = AsciiRenderer::new().unwrap();
-        let mut frame1 = AsciiFrame::new(120, 40, ' ').unwrap();
-        let mut frame2 = AsciiFrame::new(120, 40, 'X').unwrap();
+        let mut renderer = TextRenderer::new().unwrap();
+        let mut frame1 = TextFrame::new(120, 40, ' ').unwrap();
+        let mut frame2 = TextFrame::new(120, 40, 'X').unwrap();
 
         b.iter(|| {
             black_box(renderer.prepare_buffer(black_box(&frame1)).unwrap());
