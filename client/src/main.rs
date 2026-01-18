@@ -4,6 +4,7 @@ mod ascii_converter;
 mod ascii_renderer;
 mod camera;
 mod client;
+mod terminal;
 mod config;
 mod edge_detector;
 mod ffmpeg;
@@ -24,6 +25,7 @@ use std::io::stdout;
 use std::path::PathBuf;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
+use terminal::TerminalInfo;
 
 /// Guard that restores terminal state on drop.
 struct TerminalGuard;
@@ -63,7 +65,7 @@ impl From<TestPattern> for PatternType {
 /// If wanting to test locally with your webcam, enter the following:
 ///
 /// ```bash
-/// # Solo mode (local preview, no server connection)
+/// # solo mode (local preview, no server connection)
 /// cargo run --release --bin pinhole -- --solo
 /// ```
 ///
@@ -84,6 +86,7 @@ struct Args {
     /// Print help information
     #[arg(long)]
     help: bool,
+
     /// Configuration file path
     #[arg(short = 'c', long, default_value = "pinhole.toml")]
     config: PathBuf,
@@ -112,11 +115,11 @@ struct Args {
     #[arg(long)]
     preset: Option<String>,
 
-    /// ASCII width (overrides config and preset)
+    /// Render window width (overrides config and preset)
     #[arg(short = 'w', long)]
     width: Option<usize>,
 
-    /// ASCII height (overrides config and preset)
+    /// Render window height (overrides config and preset)
     #[arg(short = 'h', long)]
     height: Option<usize>,
 }
@@ -140,12 +143,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // CTRL+C signal handler
     tokio::spawn(async move {
         if signal::ctrl_c().await.is_ok() {
-            // note: no println here since we're likely in alternate screen
             cancel_token_clone.cancel();
         }
     });
 
-    // === CONFIGURATION FILE =====================================================================
+    // === CONFIGURATION ==========================================================================
     // load configuration from file or use defaults
     let mut config = if args.config.exists() {
         println!("Loading config from: {}", args.config.display());
@@ -157,6 +159,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         PinholeConfig::default()
     };
+    
+    // TODO! make use of terminal info for config
+    let _term_info = TerminalInfo::detect(config.terminal.clone())?;
 
     // === CLI ARGUMENTS ==========================================================================
     // CLI arguments override config file settings
@@ -191,8 +196,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "WARNING: Frame size ~{} bytes exceeds safe UDP limit (1400 bytes)",
                     preset.frame_size()
                 );
-                eprintln!("         Expect packet loss and rendering issues over UDP.");
-                eprintln!("         Consider using 'small' or 'medium' presets for reliable streaming.");
+                eprintln!("    Expect packet loss and rendering issues over UDP.");
+                eprintln!("    Consider using 'small' or 'medium' presets for reliable streaming.");
             }
         } else {
             eprintln!("Warning: Unknown preset '{}', ignoring", preset_str);

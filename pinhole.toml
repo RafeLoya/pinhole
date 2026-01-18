@@ -2,6 +2,17 @@
 # This file controls all aspects of the Pinhole client behavior.
 # CLI arguments will override settings specified here.
 
+[terminal]
+# The following settings are optional: pinhole attempts to detect at runtime,
+# but can be overwritten here
+#color_level = "truecolor" # valid: "monochrome", "sixteen", "256", "truecolor"
+#hyperlinks = true         # bool
+#iterm2_image = true       # bool
+#sixel = true              # bool
+#bce = true                # bool
+#mouse_reporting = true    # bool
+#bracketed_paste = true    # bool
+
 [video.source]
 # Source type: "webcam", "screen", "file", or "custom"
 type = "webcam"

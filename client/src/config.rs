@@ -1,8 +1,9 @@
 use common::frame_pixel::{MAX_EDGE_CHARS, MAX_INTENSITY_CHARS};
+use config as config_crate; // external config crate for TOML loading
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::path::Path;
-use config as config_crate;  // External config crate for TOML loading
+use crate::terminal::TerminalOverrides;
 
 /// Predefined dimension presets
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +58,8 @@ pub struct PinholeConfig {
     pub performance: PerformanceSettings,
     #[serde(default)]
     pub network: NetworkSettings,
+    #[serde(default)]
+    pub terminal: TerminalOverrides
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +319,7 @@ impl Default for PinholeConfig {
             image_processing: ImageProcessingSettings::default(),
             performance: PerformanceSettings::default(),
             network: NetworkSettings::default(),
+            terminal: TerminalOverrides::default(),
         }
     }
 }
