@@ -8,3 +8,4 @@ description = "Shared protocol and utilities for terminal-based video call servi
 
 [dependencies]
 chrono = "0.4.40"
+rand = "0.9.2"

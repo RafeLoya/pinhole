@@ -180,6 +180,39 @@ impl Client {
 
         let (frame_tx, _) = broadcast::channel::<TextFrame>(self.config.performance.frame_buffer);
 
+        // === INPUT HANDLING =====================================================================
+        // spawn task to read keyboard events and send commands
+        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TuiCommand>();
+        let input_cancel = self.cancel_token.clone();
+        task::spawn(async move {
+            let mut reader = EventStream::new();
+            loop {
+                tokio::select! {
+                    maybe_event = reader.next() => {
+                        match maybe_event {
+                            Some(Ok(Event::Key(key_event))) => {
+                                let cmd = match key_event.code {
+                                    KeyCode::Char('b') => Some(TuiCommand::ToggleBorder),
+                                    KeyCode::Char('d') => Some(TuiCommand::ToggleDebug),
+                                    KeyCode::Char('q') => Some(TuiCommand::Quit),
+                                    KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                                        Some(TuiCommand::Quit)
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(cmd) = cmd {
+                                    let _ = cmd_tx.send(cmd);
+                                }
+                            }
+                            Some(Err(_)) | None => break,
+                            _ => {}
+                        }
+                    }
+                    _ = input_cancel.cancelled() => break,
+                }
+            }
+        });
+
         // === TCP SESSION CONTROL ================================================================
         // reads control messages from server, updating local state about
         // session connection and / or peer presence.
@@ -240,7 +273,8 @@ impl Client {
         let back_chars: Vec<char> = self.config.ascii.chars.back_diagonal.chars().collect();
         let (status_tx, mut status_rx) = mpsc::unbounded_channel::<String>();
         let rend_status_tx = status_tx.clone();
-        
+        let rend_cancel_trigger = self.cancel_token.clone();
+
         task::spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut renderer = TextRenderer::new_with_chars(
@@ -313,6 +347,18 @@ impl Client {
                 // check for and display status messages
                 if let Ok(status_msg) = status_rx.try_recv() {
                     let _ = renderer.write_status_message(&status_msg);
+                }
+
+                // handle input commands
+                while let Ok(cmd) = cmd_rx.try_recv() {
+                    match cmd {
+                        TuiCommand::ToggleBorder => renderer.toggle_border(),
+                        TuiCommand::ToggleDebug => renderer.toggle_debug(),
+                        TuiCommand::Quit => {
+                            rend_cancel_trigger.cancel();
+                            return;
+                        }
+                    }
                 }
             }
         });
