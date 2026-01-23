@@ -170,8 +170,6 @@ pub struct ImageProcessingSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSettings {
-    #[serde(default = "default_fps")]
-    pub fps: u64,
     #[serde(default = "default_frame_buffer")]
     pub frame_buffer: usize,
 }
@@ -293,10 +291,6 @@ fn default_contrast() -> f32 {
 
 fn default_brightness() -> f32 {
     0.0
-}
-
-fn default_fps() -> u64 {
-    30
 }
 
 fn default_frame_buffer() -> usize {
@@ -490,7 +484,6 @@ impl Default for ImageProcessingSettings {
 impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
-            fps: default_fps(),
             frame_buffer: default_frame_buffer(),
         }
     }
@@ -529,5 +522,16 @@ impl PinholeConfig {
     /// Create a default configuration
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Get the framerate from the active video source.
+    /// For file/custom sources, returns a default of 30 fps.
+    pub fn get_source_framerate(&self) -> u32 {
+        match self.video.source.r#type.as_str() {
+            "webcam" => self.video.source.webcam.framerate,
+            "screen" => self.video.source.screen.framerate,
+            // files have inherent framerate, custom is user-defined
+            _ => 30,
+        }
     }
 }

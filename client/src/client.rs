@@ -285,11 +285,27 @@ impl Client {
                 back_chars,
             ).unwrap();
 
+            // performance tracking
+            let mut frame_count = 0u64;
+            let mut fps_timer = Instant::now();
+            let mut total_bytes_received = 0u64;
+            let mut last_frame_size = 0usize;
+            let mut stats = PerformanceStats::default();
+
             while *rend_conn_rx.borrow() && !rend_cancel.is_cancelled() {
-                // blocks until peer is present
-                tokio::select! {
-                    _ = rend_peer_rx.wait_for(|peer| *peer) => {}
-                    _ = rend_cancel.cancelled() => break
+                // blocks until peer is present, but still handle quit commands
+                loop {
+                    tokio::select! {
+                        _ = rend_peer_rx.wait_for(|peer| *peer) => break,
+                        _ = rend_cancel.cancelled() => return,
+                        Some(cmd) = cmd_rx.recv() => {
+                            if matches!(cmd, TuiCommand::Quit) {
+                                rend_cancel_trigger.cancel();
+                                return;
+                            }
+                            // ignore other commands while waiting for peer
+                        }
+                    }
                 }
 
                 let mut next_frame = None;
@@ -299,6 +315,8 @@ impl Client {
                         // received frame, move on to rendering it
                         Ok(n) => {
                             recv_count += 1;
+                            total_bytes_received += n as u64;
+                            last_frame_size = n;
                             match renderer.process_datagram(&buf[..n]) {
                                 Ok(frame) => {
                                     next_frame = Some(frame);
@@ -318,10 +336,20 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit or exit on cancellation
+                                // sleep for a tiny bit, handle commands, or exit on cancellation
                                 tokio::select! {
                                     _ = sleep(Duration::from_millis(1)) => {}
-                                    _ = rend_cancel.cancelled() => return
+                                    _ = rend_cancel.cancelled() => return,
+                                    Some(cmd) = cmd_rx.recv() => {
+                                        match cmd {
+                                            TuiCommand::ToggleBorder => renderer.toggle_border(),
+                                            TuiCommand::ToggleDebug => renderer.toggle_debug(),
+                                            TuiCommand::Quit => {
+                                                rend_cancel_trigger.cancel();
+                                                return;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -331,10 +359,20 @@ impl Client {
                             if next_frame.is_some() {
                                 break;
                             } else {
-                                // sleep for a tiny bit or exit on cancellation
+                                // sleep for a tiny bit, handle commands, or exit on cancellation
                                 tokio::select! {
                                     _ = sleep(Duration::from_millis(1)) => {}
-                                    _ = rend_cancel.cancelled() => return
+                                    _ = rend_cancel.cancelled() => return,
+                                    Some(cmd) = cmd_rx.recv() => {
+                                        match cmd {
+                                            TuiCommand::ToggleBorder => renderer.toggle_border(),
+                                            TuiCommand::ToggleDebug => renderer.toggle_debug(),
+                                            TuiCommand::Quit => {
+                                                rend_cancel_trigger.cancel();
+                                                return;
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -342,7 +380,25 @@ impl Client {
                 }
 
                 // render immediately without FPS throttling
+                let frame_start = Instant::now();
                 let _ = renderer.render(&next_frame.unwrap());
+
+                // update stats
+                frame_count += 1;
+                let elapsed = fps_timer.elapsed().as_secs_f32();
+                if elapsed >= 1.0 {
+                    stats.fps = frame_count as f32 / elapsed;
+                    frame_count = 0;
+                    fps_timer = Instant::now();
+                }
+                stats.frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+                stats.bytes_received = total_bytes_received;
+                stats.last_frame_size = last_frame_size;
+
+                // render debug pane if visible
+                if renderer.is_debug_visible() {
+                    let _ = renderer.render_debug_pane(&stats);
+                }
 
                 // check for and display status messages
                 if let Ok(status_msg) = status_rx.try_recv() {
@@ -444,7 +500,7 @@ impl Client {
             let mut frame_gen = MockFrameGenerator::new(
                 self.config.ascii.width,
                 self.config.ascii.height,
-                self.config.performance.fps as u32,
+                self.config.get_source_framerate(),
                 pattern.clone(),
             )?;
 
@@ -529,12 +585,14 @@ impl Client {
         // create TUI layout with initial dimensions
         let layout = TuiLayout::new(self.config.ascii.width, self.config.ascii.height);
 
+        let target_fps = self.config.get_source_framerate();
+
         if let Some(pattern) = &self.test_pattern {
             // mock pattern mode
             let mut frame_gen = MockFrameGenerator::new(
                 self.config.ascii.width,
                 self.config.ascii.height,
-                self.config.performance.fps as u32,
+                target_fps,
                 pattern.clone(),
             )?;
 
@@ -548,7 +606,7 @@ impl Client {
             )?;
 
             // performance tracking
-            let frame_interval = Duration::from_millis(1000 / self.config.performance.fps as u64);
+            let frame_interval = Duration::from_millis(1000 / target_fps as u64);
             let mut next_frame_time = Instant::now() + frame_interval;
             let mut frame_count = 0u64;
             let mut fps_timer = Instant::now();
@@ -634,7 +692,7 @@ impl Client {
             )?;
 
             // performance tracking
-            let frame_interval = Duration::from_millis(1000 / self.config.performance.fps);
+            let frame_interval = Duration::from_millis(1000 / target_fps as u64);
             let mut next_frame_time = Instant::now() + frame_interval;
             let mut duplicate_count = 0u64;
             let mut frame_count = 0u64;
