@@ -148,10 +148,3 @@ fn setup_custom(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
     Ok(child)
 }
 
-/// Deprecated: Legacy setup function for backwards compatibility
-/// Use `setup_from_config` instead
-#[deprecated(note = "Use setup_from_config instead")]
-pub fn setup_default() -> Result<FfmpegChild, Box<dyn Error>> {
-    let config = PinholeConfig::default();
-    setup_from_config(&config)
-}

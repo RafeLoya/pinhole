@@ -19,14 +19,9 @@ pub struct CreateRoomResponse {
 /// Response from room lookup.
 #[derive(Debug, Deserialize)]
 pub struct LookupRoomResponse {
+    #[allow(dead_code)] // needed for deserialization
     pub room_code: String,
     pub session_id: String,
-}
-
-/// Error response from the API.
-#[derive(Debug, Deserialize)]
-pub struct ErrorResponse {
-    pub error: String,
 }
 
 /// Client for interacting with the room API.

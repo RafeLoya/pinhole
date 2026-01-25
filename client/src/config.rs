@@ -522,11 +522,13 @@ impl PinholeConfig {
     }
 
     /// Load configuration from a TOML file with optional fallback to defaults
+    #[allow(dead_code)]
     pub fn from_file_or_default<P: AsRef<Path>>(path: P) -> Self {
         Self::from_file(path).unwrap_or_default()
     }
 
     /// Create a default configuration
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
     }

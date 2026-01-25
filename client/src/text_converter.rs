@@ -32,14 +32,6 @@ pub struct AsciiConverter {
 }
 
 impl AsciiConverter {
-    pub const DEFAULT_ASCII_INTENSITY: &'static str = " .:coPO?@■";
-    pub const DEFAULT_ASCII_HORIZONTAL_LINES: &'static str = "-━═";
-    pub const DEFAULT_ASCII_VERTICAL_LINES: &'static str = "|│┃";
-    pub const DEFAULT_ASCII_FORWARD_DIAGONAL: &'static str = "/╱⟋";
-    pub const DEFAULT_ASCII_BACK_DIAGONAL: &'static str = "\\╲⟍";
-    pub const DEFAULT_CONTRAST: f32 = 1.5;
-    pub const DEFAULT_BRIGHTNESS: f32 = 0.0;
-
     pub fn new(
         intensity_levels: usize,
         edge_char_count: usize,
@@ -66,19 +58,6 @@ impl AsciiConverter {
             contrast,
             brightness,
         })
-    }
-
-    pub fn default() -> Result<Self, Box<dyn Error>> {
-        Self::new(
-            Self::DEFAULT_ASCII_INTENSITY.chars().count(),
-            Self::DEFAULT_ASCII_HORIZONTAL_LINES.chars().count(),
-            640,
-            480,
-            true, // edge detection enabled by default
-            EdgeDetector::DEFAULT_EDGE_THRESHOLD,
-            Self::DEFAULT_CONTRAST,
-            Self::DEFAULT_BRIGHTNESS,
-        )
     }
 
     /// Convert an `ImageFrame` to an ASCII art representation with edges

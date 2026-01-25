@@ -66,6 +66,7 @@ impl TuiLayout {
     }
 
     /// Total width including border.
+    #[allow(dead_code)]
     pub fn total_width(&self) -> usize {
         if self.border_visible {
             self.video_width + 2
@@ -75,6 +76,7 @@ impl TuiLayout {
     }
 
     /// Total height including border, status, and debug.
+    #[allow(dead_code)]
     pub fn total_height(&self) -> usize {
         let mut height = self.video_height;
         if self.border_visible {
@@ -203,6 +205,7 @@ impl TextRenderer {
     }
 
     /// Create a new renderer with default character mappings
+    #[allow(dead_code)]
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Self::new_with_chars(
             " .:coPO?@■".chars().collect(),
@@ -321,6 +324,7 @@ impl TextRenderer {
     }
 
     /// Check if border is visible.
+    #[allow(dead_code)]
     pub fn is_border_visible(&self) -> bool {
         self.layout.border_visible
     }
@@ -331,6 +335,7 @@ impl TextRenderer {
     }
 
     /// Get a mutable reference to the layout.
+    #[allow(dead_code)]
     pub fn layout_mut(&mut self) -> &mut TuiLayout {
         &mut self.layout
     }
@@ -599,6 +604,7 @@ impl TextRenderer {
     /// Serializes an `TextFrame` into bytes (full frame, no compression)
     ///
     /// Deprecated: Use FrameSerializer for diff-based compression
+    #[allow(dead_code)]
     pub fn serialize_frame(frame: &TextFrame) -> Vec<u8> {
         // type (1 byte) + width (8 bytes) + height (8 bytes) + pixel data
         let mut bytes = Vec::with_capacity(17 + frame.w * frame.h);
@@ -738,6 +744,7 @@ impl FrameSerializer {
     }
 
     /// Reset serializer state (e.g., after connection reset)
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.prev_frame = None;
         self.changes_buffer.clear();

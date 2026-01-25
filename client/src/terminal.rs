@@ -39,6 +39,7 @@ impl From<ColorLevelOverride> for ColorLevel {
 ///
 /// Unless a valid override value is provided, this will be configured
 /// during runtime.
+#[allow(dead_code)] // infrastructure for future terminal capability detection
 pub struct TerminalInfo {
     /// Features, assessed during runtime
     caps: Capabilities,
@@ -46,6 +47,7 @@ pub struct TerminalInfo {
     overrides: TerminalOverrides,
 }
 
+#[allow(dead_code)] // infrastructure for future terminal capability detection
 impl TerminalInfo {
     /// Determine terminal emulator features during runtime
     /// & override with user-defined settings

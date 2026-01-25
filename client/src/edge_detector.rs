@@ -94,9 +94,6 @@ pub struct EdgeDetector {
 }
 
 impl EdgeDetector {
-    /// Default `threshold` value if none is provided
-    pub const DEFAULT_EDGE_THRESHOLD: f32 = 20.0;
-
     pub fn new(w: usize, h: usize, threshold: f32) -> Self {
         let edge_info = Arc::new(ArcSwap::from_pointee(EdgeInfo {
             magnitude: vec![0.0; w * h],
