@@ -21,9 +21,11 @@ use crate::room_client::RoomClient;
 use crate::terminal::TerminalGuard;
 use crate::terminal::TerminalInfo;
 use clap::Parser;
+use crossterm::event::{read, Event, KeyCode};
 use ffmpeg_sidecar::command::ffmpeg_is_installed;
+use ffmpeg_sidecar::download::auto_download;
+use ffmpeg_sidecar::version::ffmpeg_version;
 use std::error::Error;
-use std::process;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
@@ -32,10 +34,8 @@ use tokio_util::sync::CancellationToken;
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    if !ffmpeg_is_installed() {
-        eprintln!("[ERROR] FFmpeg is not installed or could not be found.");
-        process::exit(1);
-    }
+    // check for FFmpeg availability & optionally install
+    ffmpeg_check()?;
 
     // === SHUTDOWN HANDLER =======================================================================
     let cancel_token = CancellationToken::new();
@@ -118,6 +118,49 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+
+/// Check if FFmpeg is installed. If not, ask if user would want to download
+/// through pinhole. If so, FFmpeg will be installed through `ffmpeg-sidecar`.
+/// Else, download instructions are given and program exits with error
+fn ffmpeg_check() -> Result<(), Box<dyn Error>> {
+    if ffmpeg_is_installed() {
+        if let Ok(version) = ffmpeg_version() {
+            println!("FFmpeg version: {}", version);
+        }
+        return Ok(())
+    }
+
+    println!("[ERROR] FFmpeg is not installed or could not be found.");
+    println!("        Would you like to download the CLI through pinhole? (y/n)");
+
+    loop {
+        if let Event::Key(event) = read()? {
+            match event.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    println!("[INFO] attempting to download FFmpeg...");
+                    auto_download()?;
+                    if let Ok(version) = ffmpeg_version() {
+                        println!("[INFO] FFmpeg downloaded successfully, version: {}", version);
+                    }
+                    return Ok(())
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') => {
+                    println!("[INFO] declined to download FFmpeg.");
+                    println!("       consult https://www.ffmpeg.org/ for download instructions, or:");
+                    #[cfg(target_os = "macos")]
+                    println!("       install with: brew install ffmpeg");
+                    #[cfg(target_os = "linux")]
+                    println!("       install with your distro's package manager (ex. sudo apt install ffmpeg)");
+                    #[cfg(target_os = "windows")]
+                    println!("       install with: winget install ffmpeg");
+
+                    return Err("FFmpeg is required but not installed".into());
+                }
+                _ => {}
+            }
+        }
+    }
+}
 
 /// Host a session: create room code and wait for peer.
 async fn run_host(
