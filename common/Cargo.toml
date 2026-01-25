@@ -7,5 +7,5 @@ repository = "https://github.com/RafeLoya/pinhole"
 description = "Shared protocol and utilities for terminal-based video call service"
 
 [dependencies]
-chrono = "0.4.40"
+chrono = "0.4.43"
 rand = "0.9.2"
