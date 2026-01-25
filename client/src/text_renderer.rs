@@ -369,6 +369,9 @@ impl TextRenderer {
     ///
     /// Separate function for benchmarking the rendering logic without I/O overhead.
     /// Returns the size of the prepared buffer.
+    ///
+    /// Uses sequential batching: consecutive changed characters on the same row
+    /// are written with a single cursor position command, reducing ANSI overhead.
     pub fn prepare_buffer(&mut self, frame: &TextFrame) -> Result<usize, Box<dyn Error>> {
         // did frame size change?
         if frame.w != self.prev_w
@@ -393,34 +396,58 @@ impl TextRenderer {
         let col_offset = self.layout.video_col_offset();
 
         for y in 0..frame.h {
-            for x in 0..frame.w {
+            let mut x = 0;
+            while x < frame.w {
                 let i = y * frame.w + x;
 
-                if i < frame.pixels().len()
-                    && i < self.prev_frame.len()
-                    && frame.pixels()[i] != self.prev_frame[i]
+                // skip unchanged pixels
+                if i >= frame.pixels().len()
+                    || i >= self.prev_frame.len()
+                    || frame.pixels()[i] == self.prev_frame[i]
                 {
+                    x += 1;
+                    continue;
+                }
+
+                // found a changed pixel, start a run
+                let run_start_x = x;
+
+                // write cursor position once for the start of the run
+                // ESC [
+                self.output_buffer.push(0x1B);
+                self.output_buffer.push(b'[');
+
+                // row (y + 1 + row_offset for border)
+                let mut buf = itoa::Buffer::new();
+                self.output_buffer
+                    .extend_from_slice(buf.format(y + 1 + row_offset).as_bytes());
+
+                // ;
+                self.output_buffer.push(b';');
+
+                // col (x + 1 + col_offset for border)
+                let mut buf = itoa::Buffer::new();
+                self.output_buffer
+                    .extend_from_slice(buf.format(run_start_x + 1 + col_offset).as_bytes());
+
+                // H
+                self.output_buffer.push(b'H');
+
+                // collect consecutive changed characters
+                while x < frame.w {
+                    let i = y * frame.w + x;
+
+                    if i >= frame.pixels().len() || i >= self.prev_frame.len() {
+                        break;
+                    }
+
+                    // stop run if pixel unchanged
+                    if frame.pixels()[i] == self.prev_frame[i] {
+                        break;
+                    }
+
                     let pixel = frame.pixels()[i];
                     let ch = self.pixel_to_char(pixel);
-
-                    // write ANSI escape code sequence: ESC [ row ; col H char
-                    // ESC [
-                    self.output_buffer.push(0x1B);
-                    self.output_buffer.push(b'[');
-
-                    // row (y + 1 + row_offset for border)
-                    let mut buf = itoa::Buffer::new();
-                    self.output_buffer.extend_from_slice(buf.format(y + 1 + row_offset).as_bytes());
-
-                    // ;
-                    self.output_buffer.push(b';');
-
-                    // col (x + 1 + col_offset for border)
-                    let mut buf = itoa::Buffer::new();
-                    self.output_buffer.extend_from_slice(buf.format(x + 1 + col_offset).as_bytes());
-
-                    // H
-                    self.output_buffer.push(b'H');
 
                     // encode char to UTF-8 and append
                     let mut char_buf = [0u8; 4];
@@ -428,6 +455,7 @@ impl TextRenderer {
                     self.output_buffer.extend_from_slice(char_str.as_bytes());
 
                     self.prev_frame[i] = pixel;
+                    x += 1;
                 }
             }
         }
