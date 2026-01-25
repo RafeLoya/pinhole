@@ -11,3 +11,4 @@ pub mod mock_frame_generator;
 pub mod ffmpeg;
 pub mod client;
 pub mod room_client;
+pub mod cli;
