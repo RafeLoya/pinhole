@@ -9,7 +9,7 @@ use crate::mock_frame_generator::PatternType;
 /// Essentially `PatternType`, separate to keep `mock_frame_generator.rs`
 /// reusable without requiring `clap`
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
-pub enum TestPattern {
+pub(crate) enum TestPattern {
     /// Checkerboard pattern
     Checkerboard,
     /// Horizontal line moving from top to bottom
@@ -18,7 +18,7 @@ pub enum TestPattern {
 
 /// Webcam, Screen, and (to be implemented) File
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
-pub enum SourceType {
+pub(crate) enum SourceType {
     /// Webcam capture
     Webcam,
     /// Screen capture
@@ -37,7 +37,7 @@ impl From<TestPattern> for PatternType {
 /// Terminal-based video calling client.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-pub struct Args {
+pub(crate) struct Args {
     /// Configuration file path
     #[arg(short = 'c', long, default_value = "pinhole.toml", global = true)]
     pub(crate) config: PathBuf,
@@ -71,7 +71,7 @@ pub struct Args {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Command {
+pub(crate) enum Command {
     /// Host a session and generate a room code for others to join.
     Host {
         /// Room API server URL
@@ -125,7 +125,7 @@ pub enum Command {
 }
 
 /// Applies dimension overrides from CLI arguments.
-pub fn apply_dimension_overrides(config: &mut PinholeConfig, args: &Args) {
+pub(crate) fn apply_dimension_overrides(config: &mut PinholeConfig, args: &Args) {
     if let Some(preset_str) = &args.preset {
         if let Some(preset) = DimensionPreset::from_str(preset_str) {
             let (w, h) = preset.dimensions();
@@ -167,7 +167,7 @@ pub fn apply_dimension_overrides(config: &mut PinholeConfig, args: &Args) {
 }
 
 /// Applies source type override from CLI arguments.
-pub fn apply_source_override(config: &mut PinholeConfig, args: &Args) {
+pub(crate) fn apply_source_override(config: &mut PinholeConfig, args: &Args) {
     if let Some(source) = &args.source {
         let source_str = match source {
             SourceType::Webcam => "webcam",
@@ -179,7 +179,7 @@ pub fn apply_source_override(config: &mut PinholeConfig, args: &Args) {
 }
 
 /// Applies image processing overrides from CLI arguments.
-pub fn apply_image_processing_overrides(config: &mut PinholeConfig, args: &Args) {
+pub(crate) fn apply_image_processing_overrides(config: &mut PinholeConfig, args: &Args) {
     if args.no_edges {
         config.image_processing.edge_detection = false;
         println!("Edge detection disabled");

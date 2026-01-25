@@ -10,9 +10,9 @@ use crate::config::PinholeConfig;
 // how much they influence / contribute to the human eye's
 // perception of brightness.
 
-pub const R_LUMINANCE: f32 = 0.2989;
-pub const G_LUMINANCE: f32 = 0.5870;
-pub const B_LUMINANCE: f32 = 0.1140;
+pub(crate) const R_LUMINANCE: f32 = 0.2989;
+pub(crate) const G_LUMINANCE: f32 = 0.5870;
+pub(crate) const B_LUMINANCE: f32 = 0.1140;
 
 /// Intermediary translator to transform an `ImageFrame` into a `TextFrame`
 pub struct TextConverter {

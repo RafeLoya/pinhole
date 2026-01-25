@@ -93,7 +93,7 @@ impl TuiLayout {
 
 /// Performance statistics for debug pane display.
 #[derive(Clone, Default)]
-pub struct PerformanceStats {
+pub(crate) struct PerformanceStats {
     /// Actual frames per second
     pub fps: f32,
     /// Time to process last frame in milliseconds
@@ -354,7 +354,7 @@ impl TextRenderer {
     }
 
     /// Render the debug pane with performance statistics.
-    pub fn render_debug_pane(&self, stats: &PerformanceStats) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn render_debug_pane(&self, stats: &PerformanceStats) -> Result<(), Box<dyn Error>> {
         if !self.layout.debug_visible {
             return Ok(());
         }
