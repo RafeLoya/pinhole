@@ -250,19 +250,18 @@ impl Camera {
 
 impl Drop for Camera {
     fn drop(&mut self) {
-        // stop background thread if running
+        // kill FFmpeg first, this unblocks any read_exact() calls
+        if let Err(e) = self.ffmpeg_proc.kill() {
+            eprintln!("failed to kill ffmpeg: {}", e);
+        }
+
+        // signal background thread to stop
         if let Some(running) = &self.running {
             *running.lock().unwrap() = false;
         }
 
-        // wait for thread to finish
         if let Some(thread) = self.reader_thread.take() {
             let _ = thread.join();
-        }
-
-        // kill FFmpeg when Camera is dropped
-        if let Err(e) = self.ffmpeg_proc.kill() {
-            eprintln!("failed to kill ffmpeg: {}", e);
         }
     }
 }

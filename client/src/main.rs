@@ -54,6 +54,14 @@ enum TestPattern {
     MovingLine,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum SourceType {
+    /// Webcam capture
+    Webcam,
+    /// Screen capture
+    Screen,
+}
+
 impl From<TestPattern> for PatternType {
     fn from(pattern: TestPattern) -> Self {
         match pattern {
@@ -86,6 +94,10 @@ struct Args {
     /// Render window height (overrides config and preset)
     #[arg(short = 'H', long, global = true)]
     height: Option<usize>,
+
+    /// Video source type (overrides config)
+    #[arg(short = 's', long, global = true)]
+    source: Option<SourceType>,
 
     #[command(subcommand)]
     command: Command,
@@ -175,6 +187,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _term_info = TerminalInfo::detect(config.terminal.clone())?;
 
     apply_dimension_overrides(&mut config, &args);
+    apply_source_override(&mut config, &args);
 
     let pattern_type = args.test_pattern.map(PatternType::from);
     if pattern_type.is_some() {
@@ -213,6 +226,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             run_solo(config, pattern_type, cancel_token).await?;
         }
 
+        // legacy session join, join command preferred
         Command::Connect {
             tcp_addr,
             udp_addr,
@@ -268,6 +282,18 @@ fn apply_dimension_overrides(config: &mut PinholeConfig, args: &Args) {
     }
 }
 
+/// Applies source type override from CLI arguments.
+fn apply_source_override(config: &mut PinholeConfig, args: &Args) {
+    if let Some(source) = &args.source {
+        let source_str = match source {
+            SourceType::Webcam => "webcam",
+            SourceType::Screen => "screen",
+        };
+        config.video.source.r#type = source_str.to_string();
+        println!("Video source override: {}", source_str);
+    }
+}
+
 /// Host a session: create room code and wait for peer.
 async fn run_host(
     config: PinholeConfig,
@@ -289,9 +315,7 @@ async fn run_host(
     // create room
     let room = room_client.create_room().await?;
     println!();
-    println!("╔════════════════════════════════════════╗");
-    println!("║  Room Code: {:^25} ║", room.room_code);
-    println!("╚════════════════════════════════════════╝");
+    println!("Room Code: {:^25}", room.room_code);
     println!();
     println!("Share this code with your peer to connect.");
     println!("Press 'q' to quit, 'b' to toggle border, 'd' to toggle debug");
@@ -309,15 +333,16 @@ async fn run_host(
         cancel_token.clone(),
     );
 
-    tokio::select! {
-        result = client.run() => {
-            if let Err(e) = result {
-                drop(_terminal_guard);
-                eprintln!("Error: {}", e);
-            }
-        }
-        _ = cancel_token.cancelled() => {}
-    }
+    // tokio::select! {
+    //     result = client.run() => {
+    //         if let Err(e) = result {
+    //             drop(_terminal_guard);
+    //             eprintln!("Error: {}", e);
+    //         }
+    //     }
+    //     _ = cancel_token.cancelled() => {}
+    // }
+    cleanup(cancel_token, _terminal_guard, client).await;
 
     Ok(())
 }
@@ -354,6 +379,21 @@ async fn run_join(
         cancel_token.clone(),
     );
 
+    // tokio::select! {
+    //     result = client.run() => {
+    //         if let Err(e) = result {
+    //             drop(_terminal_guard);
+    //             eprintln!("Error: {}", e);
+    //         }
+    //     }
+    //     _ = cancel_token.cancelled() => {}
+    // }
+    cleanup(cancel_token, _terminal_guard, client).await;
+
+    Ok(())
+}
+
+async fn cleanup(cancel_token: CancellationToken, _terminal_guard: TerminalGuard, client: Client) {
     tokio::select! {
         result = client.run() => {
             if let Err(e) = result {
@@ -363,8 +403,6 @@ async fn run_join(
         }
         _ = cancel_token.cancelled() => {}
     }
-
-    Ok(())
 }
 
 /// Run in solo mode (local preview).
@@ -446,15 +484,16 @@ async fn run_connect(
         cancel_token.clone(),
     );
 
-    tokio::select! {
-        result = client.run() => {
-            if let Err(e) = result {
-                drop(_terminal_guard);
-                eprintln!("Error in network mode: {}", e);
-            }
-        }
-        _ = cancel_token.cancelled() => {}
-    }
+    // tokio::select! {
+    //     result = client.run() => {
+    //         if let Err(e) = result {
+    //             drop(_terminal_guard);
+    //             eprintln!("Error in network mode: {}", e);
+    //         }
+    //     }
+    //     _ = cancel_token.cancelled() => {}
+    // }
+    cleanup(cancel_token, _terminal_guard, client).await;
 
     Ok(())
 }
