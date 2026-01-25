@@ -160,6 +160,8 @@ pub struct AsciiChars {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageProcessingSettings {
+    #[serde(default = "default_edge_detection")]
+    pub edge_detection: bool,
     #[serde(default = "default_edge_threshold")]
     pub edge_threshold: f32,
     #[serde(default = "default_contrast")]
@@ -170,8 +172,6 @@ pub struct ImageProcessingSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSettings {
-    #[serde(default = "default_fps")]
-    pub fps: u64,
     #[serde(default = "default_frame_buffer")]
     pub frame_buffer: usize,
 }
@@ -283,6 +283,10 @@ fn default_back_diagonal_chars() -> String {
     "\\╲⟍".to_string()
 }
 
+fn default_edge_detection() -> bool {
+    true
+}
+
 fn default_edge_threshold() -> f32 {
     127.5
 }
@@ -293,10 +297,6 @@ fn default_contrast() -> f32 {
 
 fn default_brightness() -> f32 {
     0.0
-}
-
-fn default_fps() -> u64 {
-    30
 }
 
 fn default_frame_buffer() -> usize {
@@ -480,6 +480,7 @@ impl AsciiChars {
 impl Default for ImageProcessingSettings {
     fn default() -> Self {
         Self {
+            edge_detection: default_edge_detection(),
             edge_threshold: default_edge_threshold(),
             contrast: default_contrast(),
             brightness: default_brightness(),
@@ -490,7 +491,6 @@ impl Default for ImageProcessingSettings {
 impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
-            fps: default_fps(),
             frame_buffer: default_frame_buffer(),
         }
     }
@@ -522,12 +522,25 @@ impl PinholeConfig {
     }
 
     /// Load configuration from a TOML file with optional fallback to defaults
+    #[allow(dead_code)]
     pub fn from_file_or_default<P: AsRef<Path>>(path: P) -> Self {
         Self::from_file(path).unwrap_or_default()
     }
 
     /// Create a default configuration
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Get the framerate from the active video source.
+    /// For file/custom sources, returns a default of 30 fps.
+    pub fn get_source_framerate(&self) -> u32 {
+        match self.video.source.r#type.as_str() {
+            "webcam" => self.video.source.webcam.framerate,
+            "screen" => self.video.source.screen.framerate,
+            // files have inherent framerate, custom is user-defined
+            _ => 30,
+        }
     }
 }

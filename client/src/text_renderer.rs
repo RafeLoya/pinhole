@@ -5,6 +5,7 @@ use std::error::Error;
 use std::io;
 use std::io::Write;
 use itoa;
+use crate::config::PinholeConfig;
 
 // box-drawing characters for TUI border
 const BOX_TOP_LEFT: char = '┌';
@@ -66,6 +67,7 @@ impl TuiLayout {
     }
 
     /// Total width including border.
+    #[allow(dead_code)]
     pub fn total_width(&self) -> usize {
         if self.border_visible {
             self.video_width + 2
@@ -75,6 +77,7 @@ impl TuiLayout {
     }
 
     /// Total height including border, status, and debug.
+    #[allow(dead_code)]
     pub fn total_height(&self) -> usize {
         let mut height = self.video_height;
         if self.border_visible {
@@ -203,6 +206,7 @@ impl TextRenderer {
     }
 
     /// Create a new renderer with default character mappings
+    #[allow(dead_code)]
     pub fn new() -> Result<Self, Box<dyn Error>> {
         Self::new_with_chars(
             " .:coPO?@■".chars().collect(),
@@ -210,6 +214,18 @@ impl TextRenderer {
             "|│┃".chars().collect(),
             "/╱⟋".chars().collect(),
             "\\╲⟍".chars().collect(),
+        )
+    }
+
+    /// Creates a new renderer from configuration.
+    pub fn from_config(config: &PinholeConfig, layout: TuiLayout) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_layout(
+            config.ascii.chars.intensity.chars().collect(),
+            config.ascii.chars.horizontal_lines.chars().collect(),
+            config.ascii.chars.vertical_lines.chars().collect(),
+            config.ascii.chars.forward_diagonal.chars().collect(),
+            config.ascii.chars.back_diagonal.chars().collect(),
+            layout,
         )
     }
 
@@ -321,6 +337,7 @@ impl TextRenderer {
     }
 
     /// Check if border is visible.
+    #[allow(dead_code)]
     pub fn is_border_visible(&self) -> bool {
         self.layout.border_visible
     }
@@ -331,6 +348,7 @@ impl TextRenderer {
     }
 
     /// Get a mutable reference to the layout.
+    #[allow(dead_code)]
     pub fn layout_mut(&mut self) -> &mut TuiLayout {
         &mut self.layout
     }
@@ -369,6 +387,9 @@ impl TextRenderer {
     ///
     /// Separate function for benchmarking the rendering logic without I/O overhead.
     /// Returns the size of the prepared buffer.
+    ///
+    /// Uses sequential batching: consecutive changed characters on the same row
+    /// are written with a single cursor position command, reducing ANSI overhead.
     pub fn prepare_buffer(&mut self, frame: &TextFrame) -> Result<usize, Box<dyn Error>> {
         // did frame size change?
         if frame.w != self.prev_w
@@ -393,34 +414,58 @@ impl TextRenderer {
         let col_offset = self.layout.video_col_offset();
 
         for y in 0..frame.h {
-            for x in 0..frame.w {
+            let mut x = 0;
+            while x < frame.w {
                 let i = y * frame.w + x;
 
-                if i < frame.pixels().len()
-                    && i < self.prev_frame.len()
-                    && frame.pixels()[i] != self.prev_frame[i]
+                // skip unchanged pixels
+                if i >= frame.pixels().len()
+                    || i >= self.prev_frame.len()
+                    || frame.pixels()[i] == self.prev_frame[i]
                 {
+                    x += 1;
+                    continue;
+                }
+
+                // found a changed pixel, start a run
+                let run_start_x = x;
+
+                // write cursor position once for the start of the run
+                // ESC [
+                self.output_buffer.push(0x1B);
+                self.output_buffer.push(b'[');
+
+                // row (y + 1 + row_offset for border)
+                let mut buf = itoa::Buffer::new();
+                self.output_buffer
+                    .extend_from_slice(buf.format(y + 1 + row_offset).as_bytes());
+
+                // ;
+                self.output_buffer.push(b';');
+
+                // col (x + 1 + col_offset for border)
+                let mut buf = itoa::Buffer::new();
+                self.output_buffer
+                    .extend_from_slice(buf.format(run_start_x + 1 + col_offset).as_bytes());
+
+                // H
+                self.output_buffer.push(b'H');
+
+                // collect consecutive changed characters
+                while x < frame.w {
+                    let i = y * frame.w + x;
+
+                    if i >= frame.pixels().len() || i >= self.prev_frame.len() {
+                        break;
+                    }
+
+                    // stop run if pixel unchanged
+                    if frame.pixels()[i] == self.prev_frame[i] {
+                        break;
+                    }
+
                     let pixel = frame.pixels()[i];
                     let ch = self.pixel_to_char(pixel);
-
-                    // write ANSI escape code sequence: ESC [ row ; col H char
-                    // ESC [
-                    self.output_buffer.push(0x1B);
-                    self.output_buffer.push(b'[');
-
-                    // row (y + 1 + row_offset for border)
-                    let mut buf = itoa::Buffer::new();
-                    self.output_buffer.extend_from_slice(buf.format(y + 1 + row_offset).as_bytes());
-
-                    // ;
-                    self.output_buffer.push(b';');
-
-                    // col (x + 1 + col_offset for border)
-                    let mut buf = itoa::Buffer::new();
-                    self.output_buffer.extend_from_slice(buf.format(x + 1 + col_offset).as_bytes());
-
-                    // H
-                    self.output_buffer.push(b'H');
 
                     // encode char to UTF-8 and append
                     let mut char_buf = [0u8; 4];
@@ -428,6 +473,7 @@ impl TextRenderer {
                     self.output_buffer.extend_from_slice(char_str.as_bytes());
 
                     self.prev_frame[i] = pixel;
+                    x += 1;
                 }
             }
         }
@@ -571,6 +617,7 @@ impl TextRenderer {
     /// Serializes an `TextFrame` into bytes (full frame, no compression)
     ///
     /// Deprecated: Use FrameSerializer for diff-based compression
+    #[allow(dead_code)]
     pub fn serialize_frame(frame: &TextFrame) -> Vec<u8> {
         // type (1 byte) + width (8 bytes) + height (8 bytes) + pixel data
         let mut bytes = Vec::with_capacity(17 + frame.w * frame.h);
@@ -710,6 +757,7 @@ impl FrameSerializer {
     }
 
     /// Reset serializer state (e.g., after connection reset)
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.prev_frame = None;
         self.changes_buffer.clear();

@@ -2,6 +2,7 @@ pub mod text_frame;
 pub mod frame_encoding;
 pub mod frame_pixel;
 pub mod logger;
+pub mod room_code;
 
 /// Maximum safe UDP packet size to avoid IP fragmentation
 /// Ethernet MTU (1500) - IP header (20) - UDP header (8) = 1472 bytes

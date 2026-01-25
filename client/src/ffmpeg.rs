@@ -69,10 +69,9 @@ fn setup_screen(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
     let mut cmd = FfmpegCommand::new();
 
     if cfg!(target_os = "macos") {
+        // note: -framerate is ignored for screen capture, fps filter enforces it
         println!("MacOS screen capture - using avfoundation");
-        cmd.format("avfoundation")
-            .args(["-framerate", &screen.framerate.to_string()])
-            .input(&screen.device);
+        cmd.format("avfoundation").input(&screen.device);
     } else if cfg!(target_os = "linux") {
         println!("Linux screen capture - using x11grab");
         cmd.format("x11grab")
@@ -80,13 +79,20 @@ fn setup_screen(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
             .args(["-video_size", &format!("{}x{}", screen.width, screen.height)])
             .input(&screen.device);
     } else if cfg!(target_os = "windows") {
+        // note: -framerate may be ignored for gdigrab, fps filter enforces it
         println!("Windows screen capture - using gdigrab");
-        cmd.format("gdigrab")
-            .args(["-framerate", &screen.framerate.to_string()])
-            .input(&screen.device);
+        cmd.format("gdigrab").input(&screen.device);
     } else {
         return Err("Current OS not supported for screen capture".into());
     }
+
+    // fps filter enforces framerate (input -framerate is ignored on macOS/Windows)
+    // scale filter downsamples from native resolution (e.g. Retina 3024x1964)
+    let video_filter = format!(
+        "fps={},scale={}:{}",
+        screen.framerate, screen.width, screen.height
+    );
+    cmd.args(["-vf", &video_filter]);
 
     // output format and low-latency options
     cmd.format("rawvideo")
@@ -142,10 +148,3 @@ fn setup_custom(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
     Ok(child)
 }
 
-/// Deprecated: Legacy setup function for backwards compatibility
-/// Use `setup_from_config` instead
-#[deprecated(note = "Use setup_from_config instead")]
-pub fn setup_default() -> Result<FfmpegChild, Box<dyn Error>> {
-    let config = PinholeConfig::default();
-    setup_from_config(&config)
-}
