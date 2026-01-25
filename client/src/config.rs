@@ -160,6 +160,8 @@ pub struct AsciiChars {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageProcessingSettings {
+    #[serde(default = "default_edge_detection")]
+    pub edge_detection: bool,
     #[serde(default = "default_edge_threshold")]
     pub edge_threshold: f32,
     #[serde(default = "default_contrast")]
@@ -279,6 +281,10 @@ fn default_forward_diagonal_chars() -> String {
 
 fn default_back_diagonal_chars() -> String {
     "\\╲⟍".to_string()
+}
+
+fn default_edge_detection() -> bool {
+    true
 }
 
 fn default_edge_threshold() -> f32 {
@@ -474,6 +480,7 @@ impl AsciiChars {
 impl Default for ImageProcessingSettings {
     fn default() -> Self {
         Self {
+            edge_detection: default_edge_detection(),
             edge_threshold: default_edge_threshold(),
             contrast: default_contrast(),
             brightness: default_brightness(),

@@ -15,8 +15,8 @@ pub const B_LUMINANCE: f32 = 0.1140;
 
 /// Intermediary translator to transform an `ImageFrame` into a `TextFrame`
 pub struct AsciiConverter {
-    /// Identifies edges in given `ImageFrame`s
-    edge_detector: EdgeDetector,
+    /// Identifies edges in given `ImageFrame`s (None if edge detection disabled)
+    edge_detector: Option<EdgeDetector>,
     /// Number of intensity levels (length of intensity character set)
     intensity_levels: usize,
     /// Number of edge characters per edge type
@@ -45,13 +45,18 @@ impl AsciiConverter {
         edge_char_count: usize,
         w: usize,
         h: usize,
+        edge_detection_enabled: bool,
         edge_threshold: f32,
         contrast: f32,
         brightness: f32,
     ) -> Result<Self, Box<dyn Error>> {
-        let edge_detector = EdgeDetector::new(w, h, edge_threshold);
-
-        edge_detector.start(w, h)?;
+        let edge_detector = if edge_detection_enabled {
+            let detector = EdgeDetector::new(w, h, edge_threshold);
+            detector.start(w, h)?;
+            Some(detector)
+        } else {
+            None
+        };
 
         Ok(Self {
             edge_detector,
@@ -69,6 +74,7 @@ impl AsciiConverter {
             Self::DEFAULT_ASCII_HORIZONTAL_LINES.chars().count(),
             640,
             480,
+            true, // edge detection enabled by default
             EdgeDetector::DEFAULT_EDGE_THRESHOLD,
             Self::DEFAULT_CONTRAST,
             Self::DEFAULT_BRIGHTNESS,
@@ -88,50 +94,69 @@ impl AsciiConverter {
         i_frame: &ImageFrame,
         a_frame: &mut TextFrame,
     ) -> Result<(), Box<dyn Error>> {
-        // submit the original image to the edge detector
-        self.edge_detector.submit_frame(i_frame)?;
-
         // scaling factors to map the ASCII frame's dimension
         // to the original image's dimension
         let scale_x = i_frame.w as f32 / a_frame.w as f32;
         let scale_y = i_frame.h as f32 / a_frame.h as f32;
 
-        // retrieve processed edge info
-        let edge_info = self.edge_detector.get_edge_info();
+        if let Some(ref edge_detector) = self.edge_detector {
+            // edge detection enabled
+            edge_detector.submit_frame(i_frame)?;
+            let edge_info = edge_detector.get_edge_info();
 
-        for y in 0..a_frame.h {
-            for x in 0..a_frame.w {
-                let i_x = (x as f32 * scale_x) as usize;
-                let i_y = (y as f32 * scale_y) as usize;
-                let e_i = i_y.min(edge_info.h - 1) * edge_info.w + i_x.min(edge_info.w - 1);
+            for y in 0..a_frame.h {
+                for x in 0..a_frame.w {
+                    let i_x = (x as f32 * scale_x) as usize;
+                    let i_y = (y as f32 * scale_y) as usize;
+                    let e_i = i_y.min(edge_info.h - 1) * edge_info.w + i_x.min(edge_info.w - 1);
 
-                // if an edge's magnitude is greater than the threshold,
-                // assign edge pixel instead of intensity pixel
-                if e_i < edge_info.magnitude.len() && edge_info.magnitude[e_i] > self.edge_threshold
-                {
-                    let pixel = self.angle_to_edge_pixel(edge_info.angle[e_i], edge_info.magnitude[e_i]);
-                    a_frame.set_pixel(x, y, pixel);
-                } else {
-                    // no significant edge, retrieve RGB values from
-                    // scaled pixel destination in image frame and
-                    // map by intensity
-                    if let Some(rgb) = i_frame.get_pixel(i_x, i_y) {
-                        // modify RGB w/ given brightness & contrast values
-                        let rgb_adj = self.adjust_pixel(rgb);
-                        let intensity = ImageFrame::calculate_intensity_u8(rgb_adj);
-
-                        let idx =
-                            (intensity as f32 / 255.0 * self.intensity_levels as f32) as usize;
-                        // bounds check (e.g. floating point rounding error)
-                        let idx = idx.min(self.intensity_levels - 1);
-
-                        a_frame.set_pixel(x, y, FramePixel::intensity(idx as u8));
+                    // if an edge's magnitude is greater than the threshold,
+                    // assign edge pixel instead of intensity pixel
+                    if e_i < edge_info.magnitude.len()
+                        && edge_info.magnitude[e_i] > self.edge_threshold
+                    {
+                        let pixel =
+                            self.angle_to_edge_pixel(edge_info.angle[e_i], edge_info.magnitude[e_i]);
+                        a_frame.set_pixel(x, y, pixel);
+                    } else {
+                        self.set_intensity_pixel(i_frame, a_frame, x, y, i_x, i_y);
                     }
+                }
+            }
+        } else {
+            // edge detection disabled, intensity-only mode
+            for y in 0..a_frame.h {
+                for x in 0..a_frame.w {
+                    let i_x = (x as f32 * scale_x) as usize;
+                    let i_y = (y as f32 * scale_y) as usize;
+                    self.set_intensity_pixel(i_frame, a_frame, x, y, i_x, i_y);
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Set intensity-based pixel at the given ASCII frame coordinates.
+    #[inline]
+    fn set_intensity_pixel(
+        &self,
+        i_frame: &ImageFrame,
+        a_frame: &mut TextFrame,
+        x: usize,
+        y: usize,
+        i_x: usize,
+        i_y: usize,
+    ) {
+        if let Some(rgb) = i_frame.get_pixel(i_x, i_y) {
+            let rgb_adj = self.adjust_pixel(rgb);
+            let intensity = ImageFrame::calculate_intensity_u8(rgb_adj);
+
+            let idx = (intensity as f32 / 255.0 * self.intensity_levels as f32) as usize;
+            let idx = idx.min(self.intensity_levels - 1);
+
+            a_frame.set_pixel(x, y, FramePixel::intensity(idx as u8));
+        }
     }
 
     /// Alter the color channels of an RGB pixel according to the specified

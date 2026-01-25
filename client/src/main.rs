@@ -99,6 +99,10 @@ struct Args {
     #[arg(short = 's', long, global = true)]
     source: Option<SourceType>,
 
+    /// Disable edge detection (improves performance at high resolutions)
+    #[arg(long, global = true)]
+    no_edges: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -188,6 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     apply_dimension_overrides(&mut config, &args);
     apply_source_override(&mut config, &args);
+    apply_image_processing_overrides(&mut config, &args);
 
     let pattern_type = args.test_pattern.map(PatternType::from);
     if pattern_type.is_some() {
@@ -291,6 +296,14 @@ fn apply_source_override(config: &mut PinholeConfig, args: &Args) {
         };
         config.video.source.r#type = source_str.to_string();
         println!("Video source override: {}", source_str);
+    }
+}
+
+/// Applies image processing overrides from CLI arguments.
+fn apply_image_processing_overrides(config: &mut PinholeConfig, args: &Args) {
+    if args.no_edges {
+        config.image_processing.edge_detection = false;
+        println!("Edge detection disabled");
     }
 }
 
