@@ -1,5 +1,30 @@
+//! Terminal capabilities, overrides, & setup
+
+use std::error::Error;
+use std::io::stdout;
+use crossterm::execute;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use serde::{Deserialize, Serialize};
 use termwiz::caps::{Capabilities, ColorLevel, ProbeHints};
+
+
+/// Guard that restores terminal state on drop.
+pub struct TerminalGuard;
+
+impl TerminalGuard {
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+}
 
 /// User-defined terminal capabilities, overrides runtime-detected values
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

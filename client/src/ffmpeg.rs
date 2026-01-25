@@ -4,7 +4,7 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use std::error::Error;
 
 /// Setup FFmpeg based on the provided configuration
-pub fn setup_from_config(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
+pub(crate) fn setup_from_config(config: &PinholeConfig) -> Result<FfmpegChild, Box<dyn Error>> {
     let source = &config.video.source;
 
     match source.r#type.as_str() {

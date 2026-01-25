@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Commands from TUI input handling.
 #[derive(Debug, Clone)]
-pub enum TuiCommand {
+pub(crate) enum TuiCommand {
     /// Toggle border visibility
     ToggleBorder,
     /// Toggle debug pane visibility
