@@ -46,6 +46,8 @@ impl Drop for TerminalGuard {
     }
 }
 
+// === ARGS & CONFIGURATION =======================================================================
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum TestPattern {
     /// Checkerboard pattern
@@ -54,6 +56,7 @@ enum TestPattern {
     MovingLine,
 }
 
+/// Webcam, Screen, and (to be implemented) File
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
 enum SourceType {
     /// Webcam capture
@@ -161,11 +164,13 @@ enum Command {
     },
 }
 
+// === MAIN =======================================================================================
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    // === SHUTDOWN HANDLER ========================================================================
+    // === SHUTDOWN HANDLER =======================================================================
     let cancel_token = CancellationToken::new();
     let cancel_token_clone = cancel_token.clone();
 
@@ -175,7 +180,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    // === CONFIGURATION ===========================================================================
+    // === CONFIGURATION ==========================================================================
     let mut config = if args.config.exists() {
         println!("Loading config from: {}", args.config.display());
         PinholeConfig::from_file(&args.config)?
@@ -190,6 +195,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // detect terminal capabilities
     let _term_info = TerminalInfo::detect(config.terminal.clone())?;
 
+    // various config & CLI overrides
     apply_dimension_overrides(&mut config, &args);
     apply_source_override(&mut config, &args);
     apply_image_processing_overrides(&mut config, &args);
@@ -199,7 +205,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         println!("Using test pattern: {:?}", args.test_pattern);
     }
 
-    // === COMMAND DISPATCH ========================================================================
+    // === COMMAND DISPATCH =======================================================================
     match args.command {
         Command::Host {
             api_url,

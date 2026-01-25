@@ -5,6 +5,7 @@ use std::error::Error;
 use std::io;
 use std::io::Write;
 use itoa;
+use crate::config::PinholeConfig;
 
 // box-drawing characters for TUI border
 const BOX_TOP_LEFT: char = '┌';
@@ -213,6 +214,18 @@ impl TextRenderer {
             "|│┃".chars().collect(),
             "/╱⟋".chars().collect(),
             "\\╲⟍".chars().collect(),
+        )
+    }
+
+    /// Creates a new renderer from configuration.
+    pub fn from_config(config: &PinholeConfig, layout: TuiLayout) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_layout(
+            config.ascii.chars.intensity.chars().collect(),
+            config.ascii.chars.horizontal_lines.chars().collect(),
+            config.ascii.chars.vertical_lines.chars().collect(),
+            config.ascii.chars.forward_diagonal.chars().collect(),
+            config.ascii.chars.back_diagonal.chars().collect(),
+            layout,
         )
     }
 

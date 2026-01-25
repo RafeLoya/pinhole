@@ -1,4 +1,4 @@
-use crate::text_converter::AsciiConverter;
+use crate::text_converter::TextConverter;
 use crate::text_renderer::{TextRenderer, FrameSerializer, PerformanceStats, TuiLayout};
 use crate::camera::Camera;
 use crate::config::PinholeConfig;
@@ -15,6 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task;
 use tokio::time::{sleep, Instant};
 use tokio_util::sync::CancellationToken;
@@ -42,7 +43,7 @@ enum FrameTimingAction {
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
 /// Session control is handled over TCP, frame forwarding is handled over UDP.
-/// Can either use a camera or generate a test patten
+/// Can either use a camera or generate a test pattern.
 pub struct Client {
     /// TCP address for 'control' messages (e.g. JOIN, LEAVE)
     server_tcp_addr: String,
@@ -71,6 +72,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Creates a new client with the given configuration.
     pub fn new(
         server_tcp_addr: String,
         server_udp_addr: String,
@@ -184,34 +186,7 @@ impl Client {
         // spawn task to read keyboard events and send commands
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TuiCommand>();
         let input_cancel = self.cancel_token.clone();
-        task::spawn(async move {
-            let mut reader = EventStream::new();
-            loop {
-                tokio::select! {
-                    maybe_event = reader.next() => {
-                        match maybe_event {
-                            Some(Ok(Event::Key(key_event))) => {
-                                let cmd = match key_event.code {
-                                    KeyCode::Char('b') => Some(TuiCommand::ToggleBorder),
-                                    KeyCode::Char('d') => Some(TuiCommand::ToggleDebug),
-                                    KeyCode::Char('q') => Some(TuiCommand::Quit),
-                                    KeyCode::Char('c') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
-                                        Some(TuiCommand::Quit)
-                                    }
-                                    _ => None,
-                                };
-                                if let Some(cmd) = cmd {
-                                    let _ = cmd_tx.send(cmd);
-                                }
-                            }
-                            Some(Err(_)) | None => break,
-                            _ => {}
-                        }
-                    }
-                    _ = input_cancel.cancelled() => break,
-                }
-            }
-        });
+        Self::input_handling(cmd_tx, input_cancel);
 
         // === TCP SESSION CONTROL ================================================================
         // reads control messages from server, updating local state about
@@ -333,48 +308,24 @@ impl Client {
                         }
                         // expected, wait for frame to arrive
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            if next_frame.is_some() {
-                                break;
-                            } else {
-                                // sleep for a tiny bit, handle commands, or exit on cancellation
-                                tokio::select! {
-                                    _ = sleep(Duration::from_millis(1)) => {}
-                                    _ = rend_cancel.cancelled() => return,
-                                    Some(cmd) = cmd_rx.recv() => {
-                                        match cmd {
-                                            TuiCommand::ToggleBorder => renderer.toggle_border(),
-                                            TuiCommand::ToggleDebug => renderer.toggle_debug(),
-                                            TuiCommand::Quit => {
-                                                rend_cancel_trigger.cancel();
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            if Self::poll_commands_until_frame(
+                                &mut cmd_rx,
+                                &rend_cancel,
+                                &rend_cancel_trigger,
+                                &mut renderer,
+                                &mut next_frame
+                            ).await { break; }
                         }
                         // actual receive error
                         Err(e) => {
                             eprintln!("[RENDER] UDP receive error: {e}");
-                            if next_frame.is_some() {
-                                break;
-                            } else {
-                                // sleep for a tiny bit, handle commands, or exit on cancellation
-                                tokio::select! {
-                                    _ = sleep(Duration::from_millis(1)) => {}
-                                    _ = rend_cancel.cancelled() => return,
-                                    Some(cmd) = cmd_rx.recv() => {
-                                        match cmd {
-                                            TuiCommand::ToggleBorder => renderer.toggle_border(),
-                                            TuiCommand::ToggleDebug => renderer.toggle_debug(),
-                                            TuiCommand::Quit => {
-                                                rend_cancel_trigger.cancel();
-                                                return;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            if Self::poll_commands_until_frame(
+                                &mut cmd_rx,
+                                &rend_cancel,
+                                &rend_cancel_trigger,
+                                &mut renderer,
+                                &mut next_frame
+                            ).await { break; }
                         }
                     }
                 }
@@ -516,17 +467,7 @@ impl Client {
             let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
             let mut ascii_frame =
                 TextFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
-
-            let converter = AsciiConverter::new(
-                self.config.ascii.chars.intensity.chars().count(),
-                self.config.ascii.chars.horizontal_lines.chars().count(),
-                camera_width,
-                camera_height,
-                self.config.image_processing.edge_detection,
-                self.config.image_processing.edge_threshold,
-                self.config.image_processing.contrast,
-                self.config.image_processing.brightness,
-            )?;
+            let converter = TextConverter::from_config(&self.config, camera_width, camera_height)?;
 
             while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
                 if *self.peer_flag_rx.borrow() {
@@ -542,18 +483,40 @@ impl Client {
         Ok(())
     }
 
-    /// Run in solo mode - local preview without network connection
-    /// This allows testing webcam / screen / file capture and ASCII rendering
-    /// without needing a server or peer
-    pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
-        // get camera dimensions based on source type
-        let (camera_width, camera_height) = self.get_camera_dimensions();
+    /// Polls for TUI commands until next frame is available.
+    /// Returns `true` if rendering should continue, `false` if canceled / quit.
+    async fn poll_commands_until_frame(
+        cmd_rx: &mut UnboundedReceiver<TuiCommand>,
+        rend_cancel: &CancellationToken,
+        rend_cancel_trigger: &CancellationToken,
+        renderer: &mut TextRenderer,
+        next_frame: &mut Option<TextFrame>,
+    ) -> bool {
 
-        // create channel for input commands
-        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TuiCommand>();
+        if next_frame.is_some() {
+            return true;
+        } else {
+            // sleep for a tiny bit, handle commands, or exit on cancellation
+            tokio::select! {
+                _ = sleep(Duration::from_millis(1)) => {}
+                _ = rend_cancel.cancelled() => return false,
+                Some(cmd) = cmd_rx.recv() => {
+                    match cmd {
+                        TuiCommand::ToggleBorder => renderer.toggle_border(),
+                        TuiCommand::ToggleDebug => renderer.toggle_debug(),
+                        TuiCommand::Quit => {
+                            rend_cancel_trigger.cancel();
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
 
-        // spawn input handling task
-        let input_cancel = self.cancel_token.clone();
+    /// Spawns a task to handle keyboard input events.
+    fn input_handling(cmd_tx: UnboundedSender<TuiCommand>, input_cancel: CancellationToken) {
         task::spawn(async move {
             let mut reader = EventStream::new();
             loop {
@@ -582,6 +545,21 @@ impl Client {
                 }
             }
         });
+    }
+
+    /// Run in solo mode - local preview without network connection
+    /// This allows testing webcam / screen / file capture and ASCII rendering
+    /// without needing a server or peer
+    pub async fn run_solo(&self) -> Result<(), Box<dyn Error>> {
+        // get camera dimensions based on source type
+        let (camera_width, camera_height) = self.get_camera_dimensions();
+
+        // create channel for input commands
+        let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TuiCommand>();
+
+        // spawn input handling task
+        let input_cancel = self.cancel_token.clone();
+        Self::input_handling(cmd_tx, input_cancel);
 
         // create TUI layout with initial dimensions
         let layout = TuiLayout::new(self.config.ascii.width, self.config.ascii.height);
@@ -597,14 +575,7 @@ impl Client {
                 pattern.clone(),
             )?;
 
-            let mut renderer = TextRenderer::new_with_layout(
-                self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal_lines.chars().collect(),
-                self.config.ascii.chars.vertical_lines.chars().collect(),
-                self.config.ascii.chars.forward_diagonal.chars().collect(),
-                self.config.ascii.chars.back_diagonal.chars().collect(),
-                layout,
-            )?;
+            let mut renderer = TextRenderer::from_config(&self.config, layout)?;
 
             // performance tracking
             let frame_interval = Duration::from_millis(1000 / target_fps as u64);
@@ -620,15 +591,8 @@ impl Client {
                 }
 
                 // handle input commands
-                while let Ok(cmd) = cmd_rx.try_recv() {
-                    match cmd {
-                        TuiCommand::ToggleBorder => renderer.toggle_border(),
-                        TuiCommand::ToggleDebug => renderer.toggle_debug(),
-                        TuiCommand::Quit => {
-                            self.cancel_token.cancel();
-                            return Ok(());
-                        }
-                    }
+                if let Some(value) = self.handle_input(&mut cmd_rx, &mut renderer) {
+                    return value;
                 }
 
                 let frame_start = Instant::now();
@@ -672,26 +636,8 @@ impl Client {
             let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
             let mut ascii_frame =
                 TextFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
-
-            let converter = AsciiConverter::new(
-                self.config.ascii.chars.intensity.chars().count(),
-                self.config.ascii.chars.horizontal_lines.chars().count(),
-                camera_width,
-                camera_height,
-                self.config.image_processing.edge_detection,
-                self.config.image_processing.edge_threshold,
-                self.config.image_processing.contrast,
-                self.config.image_processing.brightness,
-            )?;
-
-            let mut renderer = TextRenderer::new_with_layout(
-                self.config.ascii.chars.intensity.chars().collect(),
-                self.config.ascii.chars.horizontal_lines.chars().collect(),
-                self.config.ascii.chars.vertical_lines.chars().collect(),
-                self.config.ascii.chars.forward_diagonal.chars().collect(),
-                self.config.ascii.chars.back_diagonal.chars().collect(),
-                layout,
-            )?;
+            let converter = TextConverter::from_config(&self.config, camera_width, camera_height)?;
+            let mut renderer = TextRenderer::from_config(&self.config, layout)?;
 
             // performance tracking
             let frame_interval = Duration::from_millis(1000 / target_fps as u64);
@@ -708,15 +654,8 @@ impl Client {
                 }
 
                 // handle input commands
-                while let Ok(cmd) = cmd_rx.try_recv() {
-                    match cmd {
-                        TuiCommand::ToggleBorder => renderer.toggle_border(),
-                        TuiCommand::ToggleDebug => renderer.toggle_debug(),
-                        TuiCommand::Quit => {
-                            self.cancel_token.cancel();
-                            return Ok(());
-                        }
-                    }
+                if let Some(value) = self.handle_input(&mut cmd_rx, &mut renderer) {
+                    return value;
                 }
 
                 let frame_start = Instant::now();
@@ -782,6 +721,25 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Handles input commands in solo mode.
+    fn handle_input(
+        &self,
+        cmd_rx: &mut UnboundedReceiver<TuiCommand>,
+        renderer: &mut TextRenderer,
+    ) -> Option<Result<(), Box<dyn Error>>> {
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            match cmd {
+                TuiCommand::ToggleBorder => renderer.toggle_border(),
+                TuiCommand::ToggleDebug => renderer.toggle_debug(),
+                TuiCommand::Quit => {
+                    self.cancel_token.cancel();
+                    return Some(Ok(()));
+                }
+            }
+        }
+        None
     }
 
     /// Receive and respond to the initial handshake from the server

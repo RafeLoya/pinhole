@@ -3,6 +3,7 @@ use crate::image_frame::ImageFrame;
 use common::text_frame::TextFrame;
 use common::frame_pixel::FramePixel;
 use std::error::Error;
+use crate::config::PinholeConfig;
 
 // The coefficients below are derived from Rec. ITU-R BT.601-7.
 // In the specification, these luminance coefficients represent
@@ -14,7 +15,7 @@ pub const G_LUMINANCE: f32 = 0.5870;
 pub const B_LUMINANCE: f32 = 0.1140;
 
 /// Intermediary translator to transform an `ImageFrame` into a `TextFrame`
-pub struct AsciiConverter {
+pub struct TextConverter {
     /// Identifies edges in given `ImageFrame`s (None if edge detection disabled)
     edge_detector: Option<EdgeDetector>,
     /// Number of intensity levels (length of intensity character set)
@@ -24,14 +25,15 @@ pub struct AsciiConverter {
     /// Minimum gradient magnitude for edge detection
     edge_threshold: f32,
     /// Adjustment factor for contrast.
-    /// Values < 1.0 reduce contrast, values > 1.0 increase contrast
+    /// Values < 1.0 reduce contrast, values > 1.0 increase contrast.
     contrast: f32,
     /// Adjustment factor for brightness.
-    /// values > 0 increase brightness, values < 0 brightness
+    /// Values > 0 increase brightness, values < 0 decrease brightness.
     brightness: f32,
 }
 
-impl AsciiConverter {
+impl TextConverter {
+    /// Creates a new `TextConverter` with the given parameters.
     pub fn new(
         intensity_levels: usize,
         edge_char_count: usize,
@@ -58,6 +60,20 @@ impl AsciiConverter {
             contrast,
             brightness,
         })
+    }
+
+    /// Create a new `TextConverter` from configuration
+    pub fn from_config(config: &PinholeConfig, camera_w: usize, camera_h: usize) -> Result<Self, Box<dyn Error>> {
+        TextConverter::new(
+            config.ascii.chars.intensity.chars().count(),
+            config.ascii.chars.horizontal_lines.chars().count(),
+            camera_w,
+            camera_h,
+            config.image_processing.edge_detection,
+            config.image_processing.edge_threshold,
+            config.image_processing.contrast,
+            config.image_processing.brightness,
+        )
     }
 
     /// Convert an `ImageFrame` to an ASCII art representation with edges
