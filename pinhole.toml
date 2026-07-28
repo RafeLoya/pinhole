@@ -36,7 +36,7 @@ pixel_format = "rgb24"
 # - macOS: "1:none" (screen index, 0 = main display, 1+ = secondary)
 # - Linux: ":0.0" (X display)
 # - Windows: "desktop"
-device = "4:none"
+device = "2:none"
 width = 640
 height = 480
 framerate = 30
