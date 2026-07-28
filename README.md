@@ -47,13 +47,13 @@ Test your webcam, screen capture, or video file without connecting to a server:
 
 ```shell
 # preview your webcam
-cargo run --bin pinhole -- --solo
+cargo run --bin pinhole -- solo
 
 # preview with test pattern
-cargo run --bin pinhole -- --solo -p checkerboard
+cargo run --bin pinhole -- -p checkerboard solo
 
 # preview with custom config
-cargo run --bin pinhole -- --solo -c my-config.toml
+cargo run --bin pinhole -- -c my-config.toml solo
 ```
 
 This is perfect for:
@@ -64,14 +64,30 @@ This is perfect for:
 
 ## Network Mode (Video Chat)
 
-Connect to a server and join a session with another peer:
+Start a server, then connect two peers to the same session.
 
 ```shell
-# join a session (requires running server)
-cargo run --release --bin pinhole -- -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
+# start a server (leave this running)
+cargo run --release --bin pinhole-server
+```
+
+Join with a room code (recommended):
+
+```shell
+# peer A: create a room and get a code
+cargo run --release --bin pinhole -- host
+
+# peer B: join with the printed code
+cargo run --release --bin pinhole -- join swift-river-42
+```
+
+Or connect directly with a manual session id:
+
+```shell
+cargo run --release --bin pinhole -- connect -t <SERVER_TCP> -u <SERVER_UDP> -s <SESSION_ID>
 
 # example with local server
-cargo run --release --bin pinhole -- -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
+cargo run --release --bin pinhole -- connect -t 127.0.0.1:8080 -u 127.0.0.1:4433 -s my-session
 ```
 
 ## Dimension Control **(WIP)**
@@ -80,16 +96,16 @@ Control the ASCII frame dimensions using presets or custom values:
 
 ```shell
 # use a preset size
-cargo run --bin pinhole -- --solo --preset small    # 80x24 (UDP safe)
-cargo run --bin pinhole -- --solo --preset medium   # 120x40 (UDP safe, default)
-cargo run --bin pinhole -- --solo --preset large    # 160x50 (may have packet loss)
-cargo run --bin pinhole -- --solo --preset xlarge   # 200x60 (currently not working w/ UDP)
+cargo run --bin pinhole -- --preset small solo    # 80x24 (UDP safe)
+cargo run --bin pinhole -- --preset medium solo   # 120x40 (UDP safe, default)
+cargo run --bin pinhole -- --preset large solo    # 160x50 (may have packet loss)
+cargo run --bin pinhole -- --preset xlarge solo   # 200x60 (currently not working w/ UDP)
 
 # or specify exact dimensions
-cargo run --bin pinhole -- --solo --width 100 --height 30
+cargo run --bin pinhole -- --width 100 --height 30 solo
 
 # combine preset with overrides (width/height override preset)
-cargo run --bin pinhole -- --solo --preset large --height 60
+cargo run --bin pinhole -- --preset large --height 60 solo
 ```
 
 **Current UDP Limitations:**
