@@ -59,7 +59,7 @@ pub(crate) struct Args {
     pub(crate) height: Option<usize>,
 
     /// Video source type (overrides config)
-    #[arg(short = 's', long, global = true)]
+    #[arg(long, global = true)]
     pub(crate) source: Option<SourceType>,
 
     /// Disable edge detection (improves performance at high resolutions)
