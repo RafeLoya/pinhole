@@ -31,14 +31,17 @@ pub(crate) enum TuiCommand {
     Quit,
 }
 
-/// Result of frame timing check
-enum FrameTimingAction {
-    /// Sleep for the given duration until next frame
-    Sleep(Duration),
-    /// Reset timing - we're more than 1 frame behind
-    Reset,
-    /// Continue without sleeping - slightly behind but catching up
-    Continue,
+/// Send-side statistics shared with the rendering task for the debug pane.
+///
+/// The sending and rendering tasks are independent, so the numbers only the
+/// sender knows (bytes on the wire, compression) are published here for the
+/// pane (drawn by the renderer) to read.
+#[derive(Clone, Copy, Default)]
+struct SendStats {
+    /// Total bytes handed to the UDP socket so far.
+    bytes_sent: u64,
+    /// Fraction of bytes saved versus sending every frame in full (0.0 - 1.0).
+    compression_ratio: f32,
 }
 
 /// Terminal-based client that connects to a server for ASCII video streaming.
@@ -113,39 +116,35 @@ impl Client {
         }
     }
 
-    /// Check frame timing and determine what action to take
-    /// Returns the action and optionally a status message to log
-    fn check_frame_timing(
-        now: Instant,
+    /// Sleep until the next frame deadline, yielding to the runtime so the loop
+    /// is paced to the target framerate rather than spinning. Returns early if
+    /// cancellation is requested (the caller's loop head re-checks the token).
+    /// The returned value is the deadline for the following frame.
+    ///
+    /// If the loop has fallen more than one interval behind (e.g. a slow stretch
+    /// of `convert()`), the schedule is reset relative to now instead of
+    /// preserving the old cadence. Without this, the accumulated deficit would
+    /// be spent as a burst of un-paced catch-up frames once work sped back up.
+    async fn pace_frame(
         next_frame_time: Instant,
-        frame_time_ms: u128,
         frame_interval: Duration,
-    ) -> (FrameTimingAction, Option<String>) {
-        let one_frame_ago = now.checked_sub(frame_interval).unwrap_or(now);
+        cancel_token: &CancellationToken,
+    ) -> Instant {
+        let now = Instant::now();
 
-        if next_frame_time < one_frame_ago {
-            // more than 1 frame behind - reset to prevent spiraling
-            let message = format!(
-                "Frame took {}ms (target: {}ms) - resetting timing",
-                frame_time_ms,
-                frame_interval.as_millis()
-            );
-            (FrameTimingAction::Reset, Some(message))
-        } else if next_frame_time > now {
-            // on schedule - sleep until next frame
-            (FrameTimingAction::Sleep(next_frame_time - now), None)
+        if next_frame_time > now {
+            // on schedule: sleep the remaining time, yielding to the runtime
+            tokio::select! {
+                _ = sleep(next_frame_time - now) => {}
+                _ = cancel_token.cancelled() => {}
+            }
+            next_frame_time + frame_interval
+        } else if now.duration_since(next_frame_time) > frame_interval {
+            // more than a full frame behind: reset to avoid burst catch-up
+            now + frame_interval
         } else {
-            // slightly behind but catching up
-            let message = if frame_time_ms > frame_interval.as_millis() {
-                Some(format!(
-                    "Frame took {}ms (target: {}ms)",
-                    frame_time_ms,
-                    frame_interval.as_millis()
-                ))
-            } else {
-                None
-            };
-            (FrameTimingAction::Continue, message)
+            // slightly behind but catching up: keep the existing cadence
+            next_frame_time + frame_interval
         }
     }
 
@@ -181,6 +180,10 @@ impl Client {
         // println!("joined session: {}", self.session_id);
 
         let (frame_tx, _) = broadcast::channel::<TextFrame>(self.config.performance.frame_buffer);
+
+        // shared send-side stats (bytes sent + compression ratio) for the debug
+        // pane: written by the frame-sending task, read by the rendering task
+        let shared_stats = Arc::new(std::sync::Mutex::new(SendStats::default()));
 
         // === INPUT HANDLING =====================================================================
         // spawn task to read keyboard events and send commands
@@ -241,6 +244,7 @@ impl Client {
         let mut rend_peer_rx = self.peer_flag_rx.clone();
         let udp_rend = udp_socket.clone();
         let rend_cancel = self.cancel_token.clone();
+        let rend_stats = shared_stats.clone();
         let intensity_chars: Vec<char> = self.config.ascii.chars.intensity.chars().collect();
         let horizontal_chars: Vec<char> = self.config.ascii.chars.horizontal_lines.chars().collect();
         let vertical_chars: Vec<char> = self.config.ascii.chars.vertical_lines.chars().collect();
@@ -348,6 +352,12 @@ impl Client {
 
                 // render debug pane if visible
                 if renderer.is_debug_visible() {
+                    // pull in the send task's stats (bytes sent + compression)
+                    {
+                        let send = rend_stats.lock().unwrap();
+                        stats.bytes_sent = send.bytes_sent;
+                        stats.compression_ratio = send.compression_ratio;
+                    }
                     let _ = renderer.render_debug_pane(&stats);
                 }
 
@@ -379,6 +389,7 @@ impl Client {
         let mut ser_rx = frame_tx.subscribe();
         let send_cancel = self.cancel_token.clone();
         let send_status_tx = status_tx.clone();
+        let send_stats = shared_stats.clone();
         
         task::spawn(async move {
             while *send_conn_rx.borrow() && !send_cancel.is_cancelled() {
@@ -407,6 +418,20 @@ impl Client {
                                 }
 
                                 let _ = udp_send.send(&data).await;
+
+                                // publish send-side stats for the debug pane:
+                                // bytes on the wire and how much delta encoding
+                                // saved versus sending every frame in full
+                                {
+                                    let full_size = 17 + frame.w * frame.h;
+                                    let avg_bytes = frame_serializer.total_bytes as f64
+                                        / frame_serializer.total_frames.max(1) as f64;
+                                    let compression =
+                                        (1.0 - avg_bytes / full_size as f64).max(0.0) as f32;
+                                    let mut s = send_stats.lock().unwrap();
+                                    s.bytes_sent = frame_serializer.total_bytes;
+                                    s.compression_ratio = compression;
+                                }
 
                                 // send compression stats every 100 frames
                                 if frame_serializer.total_frames % 100 == 0 && frame_serializer.total_frames > 0 {
@@ -447,34 +472,73 @@ impl Client {
 
         // get camera dimensions based on source type
         let (camera_width, camera_height) = self.get_camera_dimensions();
+
+        // frames are produced at the source framerate and paced so the loop
+        // neither spins the CPU nor floods the broadcast channel. anything that
+        // would block is kept off the async runtime: the camera reads on a
+        // dedicated frame-dropping thread, and we yield while pacing or waiting
+        // for a peer.
+        let target_fps = self.config.get_source_framerate().max(1);
+        let frame_interval = Duration::from_millis(1000 / target_fps as u64);
+
         if let Some(pattern) = &self.test_pattern {
             let mut frame_gen = MockFrameGenerator::new(
                 self.config.ascii.width,
                 self.config.ascii.height,
-                self.config.get_source_framerate(),
+                target_fps,
                 pattern.clone(),
             )?;
+            let mut peer_wait_rx = self.peer_flag_rx.clone();
+            let mut next_frame_time = Instant::now() + frame_interval;
 
-            while *self.conn_flag_rx.borrow() {
-                if *self.peer_flag_rx.borrow() {
-                    let frame = frame_gen.generate_frame()?;
-                    let _ = frame_tx.send(frame);
+            while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
+                // yield until a peer is present instead of busy-spinning
+                if !*self.peer_flag_rx.borrow() {
+                    tokio::select! {
+                        _ = peer_wait_rx.wait_for(|peer| *peer) => {}
+                        _ = self.cancel_token.cancelled() => break,
+                    }
+                    next_frame_time = Instant::now() + frame_interval;
                 }
+
+                let frame = frame_gen.generate_frame()?;
+                let _ = frame_tx.send(frame);
+
+                next_frame_time =
+                    Self::pace_frame(next_frame_time, frame_interval, &self.cancel_token).await;
             }
         } else {
             let mut camera = Camera::from_config(&self.config)?;
+            // read FFmpeg on a dedicated thread and always grab the freshest
+            // frame, preventing buffer lag (mirrors solo mode)
+            camera.enable_frame_dropping()?;
 
             let mut image_frame = ImageFrame::new(camera_width, camera_height, 3)?;
             let mut ascii_frame =
                 TextFrame::new(self.config.ascii.width, self.config.ascii.height, ' ')?;
             let converter = TextConverter::from_config(&self.config, camera_width, camera_height)?;
+            let mut peer_wait_rx = self.peer_flag_rx.clone();
+            let mut next_frame_time = Instant::now() + frame_interval;
 
             while *self.conn_flag_rx.borrow() && !self.cancel_token.is_cancelled() {
-                if *self.peer_flag_rx.borrow() {
-                    camera.capture_frame(&mut image_frame)?;
+                // yield until a peer is present instead of busy-spinning
+                if !*self.peer_flag_rx.borrow() {
+                    tokio::select! {
+                        _ = peer_wait_rx.wait_for(|peer| *peer) => {}
+                        _ = self.cancel_token.cancelled() => break,
+                    }
+                    next_frame_time = Instant::now() + frame_interval;
+                }
+
+                // only convert / send when a genuinely new frame is available;
+                // duplicates are skipped so we don't waste work or bandwidth
+                if camera.capture_latest_frame(&mut image_frame)? {
                     converter.convert(&image_frame, &mut ascii_frame)?;
                     let _ = frame_tx.send(ascii_frame.clone());
                 }
+
+                next_frame_time =
+                    Self::pace_frame(next_frame_time, frame_interval, &self.cancel_token).await;
             }
         }
 
@@ -614,17 +678,9 @@ impl Client {
                     let _ = renderer.render_debug_pane(&stats);
                 }
 
-                // only sleep if we finished early
-                let now = Instant::now();
-                if next_frame_time > now {
-                    tokio::select! {
-                        _ = sleep(next_frame_time - now) => {}
-                        _ = self.cancel_token.cancelled() => {
-                            return Ok(());
-                        }
-                    }
-                }
-                next_frame_time += frame_interval;
+                // pace to the target framerate (resets if we fell far behind)
+                next_frame_time =
+                    Self::pace_frame(next_frame_time, frame_interval, &self.cancel_token).await;
             }
         } else {
             // camera / screen / file mode
@@ -692,33 +748,19 @@ impl Client {
                     let _ = renderer.render_debug_pane(&stats);
                 }
 
-                // calculate actual frame processing time
-                let now = Instant::now();
-                let frame_time = (now - frame_start).as_millis();
-
-                let (action, message) = Self::check_frame_timing(now, next_frame_time, frame_time, frame_interval);
-
-                if let Some(msg) = message {
-                    let _ = renderer.write_status_message(&format!("[SOLO] {}", msg));
+                // warn if this frame took longer than the target interval
+                let frame_time = frame_start.elapsed().as_millis();
+                if frame_time > frame_interval.as_millis() {
+                    let _ = renderer.write_status_message(&format!(
+                        "[SOLO] Frame took {}ms (target: {}ms)",
+                        frame_time,
+                        frame_interval.as_millis()
+                    ));
                 }
 
-                match action {
-                    FrameTimingAction::Reset => {
-                        next_frame_time = now + frame_interval;
-                    }
-                    FrameTimingAction::Sleep(duration) => {
-                        tokio::select! {
-                            _ = sleep(duration) => {}
-                            _ = self.cancel_token.cancelled() => {
-                                return Ok(());
-                            }
-                        }
-                        next_frame_time += frame_interval;
-                    }
-                    FrameTimingAction::Continue => {
-                        next_frame_time += frame_interval;
-                    }
-                }
+                // pace to the target framerate (resets if we fell far behind)
+                next_frame_time =
+                    Self::pace_frame(next_frame_time, frame_interval, &self.cancel_token).await;
             }
         }
     }
@@ -761,5 +803,73 @@ impl Client {
         } else {
             Err(format!("unexpected reply: {}", text).into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn pace_frame_advances_deadline_by_one_interval() {
+        let token = CancellationToken::new();
+        let interval = Duration::from_millis(20);
+        let next = Instant::now() + interval;
+
+        let result = Client::pace_frame(next, interval, &token).await;
+
+        assert_eq!(result, next + interval);
+    }
+
+    #[tokio::test]
+    async fn pace_frame_short_circuits_on_cancel() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let interval = Duration::from_secs(10);
+        let next = Instant::now() + interval;
+
+        // a cancelled token must return well before the 10s deadline instead of
+        // sleeping through it
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            Client::pace_frame(next, interval, &token),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "pace_frame should return promptly when cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn pace_frame_keeps_cadence_when_slightly_behind() {
+        let token = CancellationToken::new();
+        let interval = Duration::from_millis(20);
+        // less than one full interval behind
+        let next = Instant::now() - interval / 2;
+
+        let result = Client::pace_frame(next, interval, &token).await;
+
+        // keeps the original cadence rather than resetting
+        assert_eq!(result, next + interval);
+    }
+
+    #[tokio::test]
+    async fn pace_frame_resets_when_more_than_one_interval_behind() {
+        let token = CancellationToken::new();
+        let interval = Duration::from_millis(20);
+        // ten intervals behind: the schedule must be reset, not preserved
+        let stale = Instant::now() - interval * 10;
+
+        let before = Instant::now();
+        let result = Client::pace_frame(stale, interval, &token).await;
+        let after = Instant::now();
+
+        // reset relative to "now" (bounded by the surrounding samples), so the
+        // stale deficit is discarded instead of driving a catch-up burst
+        assert!(result >= before + interval);
+        assert!(result <= after + interval);
+        assert!(result > stale + interval);
     }
 }

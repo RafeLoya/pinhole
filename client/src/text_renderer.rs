@@ -98,7 +98,7 @@ pub(crate) struct PerformanceStats {
     pub fps: f32,
     /// Time to process last frame in milliseconds
     pub frame_time_ms: f32,
-    /// Ratio of diff frames to total frames (0.0 - 1.0)
+    /// Fraction of bytes saved versus sending every frame in full (0.0 - 1.0)
     pub compression_ratio: f32,
     /// Total bytes sent
     pub bytes_sent: u64,

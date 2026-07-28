@@ -29,6 +29,143 @@ use std::error::Error;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 
+/// Guard that restores terminal state on drop.
+struct TerminalGuard;
+
+impl TerminalGuard {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        enable_raw_mode()?;
+        execute!(stdout(), EnterAlternateScreen)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = execute!(stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+}
+
+// === ARGS & CONFIGURATION =======================================================================
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum TestPattern {
+    /// Checkerboard pattern
+    Checkerboard,
+    /// Horizontal line moving from top to bottom
+    MovingLine,
+}
+
+/// Webcam, Screen, and (to be implemented) File
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, ValueEnum)]
+enum SourceType {
+    /// Webcam capture
+    Webcam,
+    /// Screen capture
+    Screen,
+}
+
+impl From<TestPattern> for PatternType {
+    fn from(pattern: TestPattern) -> Self {
+        match pattern {
+            TestPattern::Checkerboard => PatternType::Checkerboard,
+            TestPattern::MovingLine => PatternType::MovingLine,
+        }
+    }
+}
+
+/// Terminal-based video calling client.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Configuration file path
+    #[arg(short = 'c', long, default_value = "pinhole.toml", global = true)]
+    config: PathBuf,
+
+    /// Test pattern (if not using a camera)
+    #[arg(short = 'p', long, global = true)]
+    test_pattern: Option<TestPattern>,
+
+    /// Dimension preset (small, medium, large, xlarge)
+    #[arg(long, global = true)]
+    preset: Option<String>,
+
+    /// Render window width (overrides config and preset)
+    #[arg(short = 'W', long, global = true)]
+    width: Option<usize>,
+
+    /// Render window height (overrides config and preset)
+    #[arg(short = 'H', long, global = true)]
+    height: Option<usize>,
+
+    /// Video source type (overrides config)
+    #[arg(long, global = true)]
+    source: Option<SourceType>,
+
+    /// Disable edge detection (improves performance at high resolutions)
+    #[arg(long, global = true)]
+    no_edges: bool,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Host a session and generate a room code for others to join.
+    Host {
+        /// Room API server URL
+        #[arg(long, default_value = "http://localhost:8000")]
+        api_url: String,
+
+        /// TCP server address
+        #[arg(short = 't', long, default_value = "127.0.0.1:8080")]
+        tcp_addr: String,
+
+        /// UDP server address
+        #[arg(short = 'u', long, default_value = "127.0.0.1:4433")]
+        udp_addr: String,
+    },
+
+    /// Join a session using a room code.
+    Join {
+        /// The room code to join (e.g., swift-river-42)
+        room_code: String,
+
+        /// Room API server URL
+        #[arg(long, default_value = "http://localhost:8000")]
+        api_url: String,
+
+        /// TCP server address
+        #[arg(short = 't', long, default_value = "127.0.0.1:8080")]
+        tcp_addr: String,
+
+        /// UDP server address
+        #[arg(short = 'u', long, default_value = "127.0.0.1:4433")]
+        udp_addr: String,
+    },
+
+    /// Local preview without server connection.
+    Solo,
+
+    /// Direct connection with manual session ID (legacy mode).
+    Connect {
+        /// TCP server address
+        #[arg(short = 't', long)]
+        tcp_addr: Option<String>,
+
+        /// UDP server address
+        #[arg(short = 'u', long)]
+        udp_addr: Option<String>,
+
+        /// Session ID to join
+        #[arg(short = 's', long)]
+        session_id: Option<String>,
+    },
+}
+
+// === MAIN =======================================================================================
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
