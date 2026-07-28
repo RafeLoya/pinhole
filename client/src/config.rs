@@ -35,6 +35,7 @@ impl DimensionPreset {
         self.frame_size() <= 1400
     }
 
+    #[allow(clippy::should_implement_trait)] // returns Option, not a FromStr impl
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "small" | "s" => Some(DimensionPreset::Small),
@@ -47,6 +48,7 @@ impl DimensionPreset {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PinholeConfig {
     #[serde(default)]
     pub video: VideoSettings,
@@ -63,6 +65,7 @@ pub struct PinholeConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct VideoSettings {
     #[serde(default)]
     pub source: VideoSource,
@@ -111,12 +114,14 @@ pub struct ScreenSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct FileSettings {
     #[serde(default)]
     pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CustomSettings {
     #[serde(default)]
     pub args: Vec<String>,
@@ -311,27 +316,7 @@ fn default_udp_addr() -> String {
     "127.0.0.1:4433".to_string()
 }
 
-impl Default for PinholeConfig {
-    fn default() -> Self {
-        Self {
-            video: VideoSettings::default(),
-            ascii: AsciiSettings::default(),
-            image_processing: ImageProcessingSettings::default(),
-            performance: PerformanceSettings::default(),
-            network: NetworkSettings::default(),
-            terminal: TerminalOverrides::default(),
-        }
-    }
-}
 
-impl Default for VideoSettings {
-    fn default() -> Self {
-        Self {
-            source: VideoSource::default(),
-            ffmpeg: FfmpegSettings::default(),
-        }
-    }
-}
 
 impl Default for VideoSource {
     fn default() -> Self {
@@ -368,19 +353,7 @@ impl Default for ScreenSettings {
     }
 }
 
-impl Default for FileSettings {
-    fn default() -> Self {
-        Self {
-            path: String::new(),
-        }
-    }
-}
 
-impl Default for CustomSettings {
-    fn default() -> Self {
-        Self { args: Vec::new() }
-    }
-}
 
 impl Default for FfmpegSettings {
     fn default() -> Self {

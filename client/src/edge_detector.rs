@@ -146,34 +146,26 @@ impl EdgeDetector {
             // create processing buffers once for this thread
             let mut buffers = ProcessingBuffers::new(cam_w, cam_h);
 
-            loop {
-                // block until frame arrives or channel disconnects
-                match frame_receiver.recv() {
-                    Ok(frame) => {
-                        // check running flag before processing
-                        if !*running.lock().unwrap() {
-                            break;
-                        }
+            // block until a frame arrives; exits when the channel disconnects
+            while let Ok(frame) = frame_receiver.recv() {
+                // check running flag before processing
+                if !*running.lock().unwrap() {
+                    break;
+                }
 
-                        // resize buffers if frame dimensions changed (rare case)
-                        buffers.resize_if_needed(frame.w, frame.h);
+                // resize buffers if frame dimensions changed (rare case)
+                buffers.resize_if_needed(frame.w, frame.h);
 
-                        // process frame using reusable buffers
-                        if let Ok(()) = Self::process_frame(&frame, threshold, &mut buffers) {
-                            // create new EdgeInfo and atomically swap it in
-                            let new_info = Arc::new(EdgeInfo {
-                                magnitude: buffers.magnitude.clone(),
-                                angle: buffers.angle.clone(),
-                                w: buffers.w,
-                                h: buffers.h,
-                            });
-                            edge_info.store(new_info);
-                        }
-                    }
-                    Err(_) => {
-                        // channel disconnected, exit thread
-                        break;
-                    }
+                // process frame using reusable buffers
+                if let Ok(()) = Self::process_frame(&frame, threshold, &mut buffers) {
+                    // create new EdgeInfo and atomically swap it in
+                    let new_info = Arc::new(EdgeInfo {
+                        magnitude: buffers.magnitude.clone(),
+                        angle: buffers.angle.clone(),
+                        w: buffers.w,
+                        h: buffers.h,
+                    });
+                    edge_info.store(new_info);
                 }
             }
         });
@@ -259,6 +251,8 @@ impl EdgeDetector {
     /// The Sobel kernels are defined as follows:
     /// - `Gx = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]`
     /// - `Gy = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]]`
+    // -1.0 coefficients are written explicitly to keep the kernel grid aligned
+    #[allow(clippy::neg_multiply)]
     fn sobel(intensity: &[f32], w: usize, h: usize, gx: &mut [f32], gy: &mut [f32]) {
         for y in 1..(h - 1) {
             for x in 1..(w - 1) {
@@ -314,15 +308,15 @@ impl EdgeDetector {
                 // normalize to 0-180 degrees
                 let angle_deg = (angle[i].to_degrees() + 180.0) % 180.0;
 
-                let (nx1, ny1, nx2, ny2) = if (angle_deg >= 0.0 && angle_deg < 22.5)
-                    || (angle_deg >= 157.5 && angle_deg < 180.0)
+                let (nx1, ny1, nx2, ny2) = if (0.0..22.5).contains(&angle_deg)
+                    || (157.5..180.0).contains(&angle_deg)
                 {
                     // horizontal edge
                     (x + 1, y, x - 1, y)
-                } else if angle_deg >= 22.5 && angle_deg < 67.5 {
+                } else if (22.5..67.5).contains(&angle_deg) {
                     // forward edge (/)
                     (x + 1, y - 1, x - 1, y + 1)
-                } else if angle_deg >= 67.5 && angle_deg < 112.5 {
+                } else if (67.5..112.5).contains(&angle_deg) {
                     // vertical edge
                     (x, y - 1, x, y + 1)
                 } else {

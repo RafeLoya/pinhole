@@ -164,7 +164,7 @@ impl TextConverter {
             v = (v - 0.5) * self.contrast + 0.5;
             v += self.brightness;
             // floor of 0.0 and ceiling of 1.0 (prevent overflow)
-            v = v.max(0.0).min(1.0);
+            v = v.clamp(0.0, 1.0);
             (v * 255.0) as u8
         };
 
@@ -180,13 +180,13 @@ impl TextConverter {
         let idx = ((magnitude / 255.0) * (self.edge_char_count as f32))
             .min((self.edge_char_count - 1) as f32) as u8;
 
-        if (angle_d >= 0.0 && angle_d < 22.5) || (angle_d >= 157.5 && angle_d < 180.0) {
+        if (0.0..22.5).contains(&angle_d) || (157.5..180.0).contains(&angle_d) {
             // gradient ~0 (horizontal gradient) -> vertical edge
             FramePixel::vertical_edge(idx)
-        } else if (angle_d >= 22.5) && (angle_d < 67.5) {
+        } else if (22.5..67.5).contains(&angle_d) {
             // gradient ~45 -> forward diagonal edge
             FramePixel::forward_diagonal(idx)
-        } else if (angle_d >= 67.5) && (angle_d < 112.5) {
+        } else if (67.5..112.5).contains(&angle_d) {
             // gradient ~90 (vertical gradient) -> horizontal edge
             FramePixel::horizontal_edge(idx)
         } else {

@@ -4,7 +4,6 @@ use common::frame_pixel::FramePixel;
 use std::error::Error;
 use std::io;
 use std::io::Write;
-use itoa;
 use crate::config::PinholeConfig;
 
 // box-drawing characters for TUI border
@@ -562,11 +561,10 @@ impl TextRenderer {
         let frame = TextFrame::from_bytes(w, h, &data[16..])?;
 
         // if dimensions changed, clear the screen to avoid artifacts
-        if let Some(ref curr) = self.current_frame {
-            if curr.w != frame.w || curr.h != frame.h {
+        if let Some(ref curr) = self.current_frame
+            && (curr.w != frame.w || curr.h != frame.h) {
                 let _ = Self::clear_screen();
             }
-        }
 
         self.current_frame = Some(frame.clone());
         Ok(frame)
@@ -683,7 +681,7 @@ impl FrameSerializer {
     /// First frame is always Full. Subsequent frames are Diff if changes < 50% of pixels.
     pub fn serialize(&mut self, frame: &TextFrame) -> Vec<u8> {
         // first frame or dimension changed? send full frame
-        let send_full = self.prev_frame.as_ref().map_or(true, |prev| {
+        let send_full = self.prev_frame.as_ref().is_none_or(|prev| {
             prev.w != frame.w || prev.h != frame.h
         });
 
@@ -698,14 +696,13 @@ impl FrameSerializer {
         let prev = self.prev_frame.as_ref().unwrap();
 
         for i in 0..frame.pixels().len() {
-            if frame.pixels()[i] != prev.pixels()[i] {
-                if i <= u16::MAX as usize {
+            if frame.pixels()[i] != prev.pixels()[i]
+                && i <= u16::MAX as usize {
                     self.changes_buffer.push(PixelChange::new(
                         i as u16,
                         frame.pixels()[i],
                     ));
                 }
-            }
         }
 
         // if more than 50% changed, send full frame (better compression)
@@ -775,6 +772,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::identity_op)] // keep `row * width + col` index form explicit
     fn test_render_single_pixel() {
         let mut renderer = TextRenderer::new().unwrap();
         let mut frame = TextFrame::new(5, 3, ' ').unwrap();
@@ -842,7 +840,7 @@ mod tests {
         assert!(result.is_ok());
 
         // verify output buffer contains data
-        assert!(renderer.output_buffer.len() > 0);
+        assert!(!renderer.output_buffer.is_empty());
     }
 
     #[test]

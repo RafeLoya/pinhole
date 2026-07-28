@@ -3,13 +3,15 @@ use std::net::SocketAddr;
 use tokio::sync::{RwLock, mpsc};
 
 pub enum Message {
+    /// Payload (session id) reserved for future use.
+    #[allow(dead_code)]
     Connect(String),
     Disconnect,
 }
 
 /// session between two peer clients, created by the SFU
+#[derive(Default)]
 pub struct Session {
-    pub id: String,
     pub client_a: Option<(SocketAddr, mpsc::UnboundedSender<Message>)>,
     pub client_b: Option<(SocketAddr, mpsc::UnboundedSender<Message>)>,
     pub udp_a: Option<SocketAddr>,
@@ -18,17 +20,6 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(id: String) -> Self {
-        Self {
-            id,
-            client_a: None,
-            client_b: None,
-            udp_a: None,
-            udp_b: None,
-            connected_notified: false,
-        }
-    }
-
     /// Check if the given address matches client A
     fn is_client_a(&self, addr: &SocketAddr) -> bool {
         self.client_a
@@ -120,6 +111,7 @@ impl Session {
         }
     }
 
+    #[allow(dead_code)]
     pub fn has_open_slot(&self) -> bool {
         self.client_a.is_none() || self.client_b.is_none()
     }
@@ -163,7 +155,7 @@ impl SessionManager {
         inner
             .sessions
             .entry(id.to_owned())
-            .or_insert_with(|| Session::new(id.to_owned()));
+            .or_default();
     }
 
     pub async fn add_client(
@@ -174,32 +166,31 @@ impl SessionManager {
     ) -> bool {
         let mut inner = self.inner.write().await;
 
-        if let Some(s) = inner.sessions.get_mut(session_id) {
-            if s.add_client(tcp_addr, tx) {
+        if let Some(s) = inner.sessions.get_mut(session_id)
+            && s.add_client(tcp_addr, tx) {
                 inner
                     .client_sessions
                     .insert(tcp_addr, session_id.to_owned());
                 return true;
             }
-        }
 
         false
     }
 
+    #[allow(dead_code)]
     pub async fn register_udp(&self, tcp: SocketAddr, udp: SocketAddr) {
         let mut inner = self.inner.write().await;
 
-        if let Some(id) = inner.client_sessions.get(&tcp).cloned() {
-            if let Some(s) = inner.sessions.get_mut(&id) {
+        if let Some(id) = inner.client_sessions.get(&tcp).cloned()
+            && let Some(s) = inner.sessions.get_mut(&id) {
                 s.register_udp(tcp, udp);
                 inner.udp_to_tcp.insert(udp, tcp);
             }
-        }
     }
 
     pub async fn get_peer_udp(&self, udp_src: &SocketAddr) -> Option<SocketAddr> {
         let inner = self.inner.read().await;
-        let tcp = inner.udp_to_tcp.get(&udp_src)?;
+        let tcp = inner.udp_to_tcp.get(udp_src)?;
         let id = inner.client_sessions.get(tcp)?;
 
         inner.sessions.get(id)?.get_peer_udp(tcp)
@@ -255,6 +246,7 @@ impl SessionManager {
 
     /// Return peer's UDP address given your own TCP address
     /// (both clients are present & peer already registered there UDP port)
+    #[allow(dead_code)]
     pub async fn get_peer_udp_from_tcp(&self, tcp: &SocketAddr) -> Option<SocketAddr> {
         let inner = self.inner.read().await;
         let id = inner.client_sessions.get(tcp)?;
@@ -262,6 +254,7 @@ impl SessionManager {
         room.get_peer_udp(tcp)
     }
 
+    #[allow(dead_code)]
     pub async fn session_full(&self, id: &str) -> bool {
         let inner = self.inner.read().await;
         inner

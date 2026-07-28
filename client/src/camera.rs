@@ -30,7 +30,9 @@ pub struct Camera {
     ffmpeg_proc: FfmpegChild,
     /// Reader, reads output frames from the FFmpeg child process
     frame_reader: Option<BufReader<ChildStdout>>,
-    /// Intermediate buffer between FFmpeg child process and ImageFrame data
+    /// Intermediate buffer between FFmpeg child process and ImageFrame data.
+    /// Used only by the non-frame-dropping `capture_frame` path.
+    #[allow(dead_code)]
     frame_buffer: Vec<u8>,
     /// Background thread for continuous frame reading (frame dropping mode)
     reader_thread: Option<JoinHandle<()>>,
@@ -88,7 +90,12 @@ impl Camera {
         })
     }
 
-    /// Reads a frame provided by the camera into the provided `ImageFrame`
+    /// Reads a frame provided by the camera into the provided `ImageFrame`.
+    ///
+    /// Currently unused since both solo and network modes read via the
+    /// frame-dropping path; retained in case the network test surfaces a need
+    /// for in-order reads.
+    #[allow(dead_code)]
     pub fn capture_frame(&mut self, frame: &mut ImageFrame) -> Result<(), Box<dyn Error>> {
         if frame.w != self.w || frame.h != self.h {
             return Err(format!(

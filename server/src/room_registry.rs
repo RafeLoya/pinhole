@@ -12,8 +12,10 @@ pub struct RoomEntry {
     /// The session ID this room maps to (may be same as room code).
     pub session_id: String,
     /// TCP address of the host who created the room.
+    #[allow(dead_code)] // reserved for future host tracking
     pub host_addr: Option<SocketAddr>,
     /// When the room was created.
+    #[allow(dead_code)]
     pub created_at: Instant,
     /// When the room was last accessed (for TTL refresh).
     pub last_accessed: Instant,
@@ -55,6 +57,7 @@ impl RoomRegistry {
     }
 
     /// Creates a new registry with default 1-hour TTL.
+    #[allow(dead_code)]
     pub fn with_default_ttl() -> Self {
         Self::new(Duration::from_secs(3600))
     }
@@ -83,6 +86,7 @@ impl RoomRegistry {
     /// Registers a room with a specific code.
     ///
     /// Returns `true` if registered, `false` if code already exists.
+    #[allow(dead_code)]
     pub async fn register(&self, code: &str, host_addr: Option<SocketAddr>) -> bool {
         if !room_code::validate(code) {
             return false;
@@ -120,6 +124,7 @@ impl RoomRegistry {
     }
 
     /// Gets the session ID for a room code without updating access time.
+    #[allow(dead_code)]
     pub async fn get_session_id(&self, code: &str) -> Option<String> {
         let code = room_code::normalize(code)?;
         let inner = self.inner.read().await;
@@ -131,6 +136,7 @@ impl RoomRegistry {
     }
 
     /// Checks if a room code exists and is not expired.
+    #[allow(dead_code)]
     pub async fn exists(&self, code: &str) -> bool {
         self.get_session_id(code).await.is_some()
     }
@@ -155,12 +161,14 @@ impl RoomRegistry {
     }
 
     /// Returns the number of active (non-expired) rooms.
+    #[allow(dead_code)]
     pub async fn len(&self) -> usize {
         let inner = self.inner.read().await;
         inner.values().filter(|e| !e.is_expired(self.ttl)).count()
     }
 
     /// Returns true if the registry has no active rooms.
+    #[allow(dead_code)]
     pub async fn is_empty(&self) -> bool {
         self.len().await == 0
     }

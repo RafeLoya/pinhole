@@ -11,6 +11,7 @@ use common::logger::Logger;
 
 /// Server acting as a Selective Forwarding Unit for connected clients,
 /// responsible for session control (TCP) and frame forwarding (UDP)
+#[allow(clippy::upper_case_acronyms)] // SFU is the established domain term
 pub struct SFU {
     /// Address for sending control messages to clients
     tcp_addr: String,
@@ -161,18 +162,16 @@ impl SFU {
                 if let (Some(src_tcp), Some(dst_tcp)) = (
                     sessions.tcp_for_udp(&src_udp).await,
                     sessions.tcp_for_udp(&dst_udp).await,
-                ) {
-                    if let Some(session_id) = sessions.session_id_for(&dst_tcp).await {
-                        if !sessions.is_connected(&session_id).await {
-                            sessions
-                                .notify_peer(&src_tcp, Message::Connect(session_id.clone()))
-                                .await;
-                            sessions
-                                .notify_peer(&dst_tcp, Message::Connect(session_id.clone()))
-                                .await;
-                            sessions.mark_connected(&session_id).await;
-                        }
-                    }
+                ) && let Some(session_id) = sessions.session_id_for(&dst_tcp).await
+                    && !sessions.is_connected(&session_id).await
+                {
+                    sessions
+                        .notify_peer(&src_tcp, Message::Connect(session_id.clone()))
+                        .await;
+                    sessions
+                        .notify_peer(&dst_tcp, Message::Connect(session_id.clone()))
+                        .await;
+                    sessions.mark_connected(&session_id).await;
                 }
 
                 match socket.send_to(&buf[..n], &dst_udp).await {

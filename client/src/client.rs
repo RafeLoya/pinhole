@@ -306,7 +306,7 @@ impl Client {
                             }
 
                             // show receive stats every 100 frames
-                            if recv_count % 100 == 0 {
+                            if recv_count.is_multiple_of(100) {
                                 let _ = rend_status_tx.send(format!("[RECV] {} frames | last: {} bytes", recv_count, n));
                             }
                         }
@@ -434,7 +434,7 @@ impl Client {
                                 }
 
                                 // send compression stats every 100 frames
-                                if frame_serializer.total_frames % 100 == 0 && frame_serializer.total_frames > 0 {
+                                if frame_serializer.total_frames.is_multiple_of(100) && frame_serializer.total_frames > 0 {
                                     let avg_bytes = frame_serializer.total_bytes / frame_serializer.total_frames;
                                     let compression = if frame_serializer.diff_frames > 0 {
                                         100.0 * (frame_serializer.diff_frames as f64) / (frame_serializer.total_frames as f64)
@@ -721,7 +721,7 @@ impl Client {
 
                 if !is_new_frame {
                     duplicate_count += 1;
-                    if duplicate_count % 10 == 0 {
+                    if duplicate_count.is_multiple_of(10) {
                         let message = format!(
                             "[SOLO] Warning: {} duplicate frames (FFmpeg slower than render loop)",
                             duplicate_count

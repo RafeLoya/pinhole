@@ -1,7 +1,6 @@
 use common::text_frame::TextFrame;
 use common::frame_pixel::FramePixel;
 use std::error::Error;
-use std::time::{Duration, Instant};
 
 /// Test patterns for local development
 #[derive(Clone)]
@@ -11,6 +10,9 @@ pub enum PatternType {
 }
 
 /// Factory for "fake" frames to test locally.
+///
+/// Frame pacing is the caller's responsibility (see `Client::pace_frame`); this
+/// generator only produces frame content.
 pub struct MockFrameGenerator {
     /// width of mock ASCII frame
     w: usize,
@@ -19,10 +21,6 @@ pub struct MockFrameGenerator {
     /// counter to determine how ASCII frame should look temporally
     /// (i.e. when to alter characters)
     frame_counter: usize,
-    /// determine current time
-    last_frame_time: Instant,
-    /// how long to wait to create a new frame (effectively FPS)
-    frame_delay: Duration,
     /// pattern to generate
     pattern_type: PatternType,
 }
@@ -38,26 +36,16 @@ impl MockFrameGenerator {
             return Err("failed to create mock frame generator".into());
         }
 
-        let frame_delay = Duration::from_millis((1000 / fps) as u64);
-
         Ok(MockFrameGenerator {
             w,
             h,
             frame_counter: 0,
-            last_frame_time: Instant::now(),
-            frame_delay,
             pattern_type,
         })
     }
 
     /// Generate a mock frame
     pub fn generate_frame(&mut self) -> Result<TextFrame, Box<dyn Error>> {
-        let elapsed = self.last_frame_time.elapsed();
-        if elapsed < self.frame_delay {
-            std::thread::sleep(self.frame_delay - elapsed);
-        }
-        self.last_frame_time = Instant::now();
-
         let mut frame = TextFrame::new(self.w, self.h, ' ')?;
 
         match self.pattern_type {
